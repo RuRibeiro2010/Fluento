@@ -1,0 +1,1 @@
+export { DigitalTwinProfileView } from './DigitalTwinProfileView';

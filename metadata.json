@@ -1,0 +1,6 @@
+{
+  "name": "Fluento",
+  "description": "AI Language Coach - SaaS platform architecture for multi-language learning",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
