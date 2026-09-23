@@ -1,22 +1,21 @@
 import { ApplicationQueryHandlers } from '../queries/query-handlers';
-import { DashboardDTO } from '../dto/application.dtos';
+import { DashboardDTO, StudyPlanDTO } from '../dto/application.dtos';
+import { CoachMessageDTO, WeeklyReviewDTO, MonthlyEvolutionDataDTO } from '../dto/coach.dtos';
+import { DetailedLessonDTO } from '../dto/lesson.dtos';
 import { IStudentRepository } from '../../domain/student/repositories/student-repository.interface';
 import { ILessonRepository } from '../../domain/lesson/repositories/lesson-repository.interface';
 import { IStudyPlanRepository } from '../../domain/learning/repositories/study-plan-repository.interface';
 import { IAnalyticsRepository } from '../../domain/analytics/repositories/analytics-repository.interface';
 import { ISubscriptionRepository } from '../../domain/billing/repositories/subscription-repository.interface';
 import { IMemoryRepository } from '../../domain/memory/repositories/memory-repository.interface';
-import { StudentEntity } from '../../domain/student/entities/student.entity';
-import { StudentId } from '../../domain/student/value-objects/student-id.vo';
-import { CEFRLevel } from '../../domain/shared/value-objects/cefr-level.vo';
-import { LanguageCode } from '../../domain/shared/value-objects/language-code.vo';
-import { SkillMatrix } from '../../domain/student/value-objects/skill-matrix.vo';
-import { LearningPreferences } from '../../domain/student/value-objects/learning-preferences.vo';
-import { TimeStamp } from '../../domain/shared/value-objects/time-stamp.vo';
-import { StudyPlanFactory } from '../../domain/learning/factories/study-plan.factory';
-import { AnalyticsFactory } from '../../domain/analytics/factories/analytics.factory';
-import { SubscriptionFactory } from '../../domain/billing/factories/subscription.factory';
-import { MemoryFactory } from '../../domain/memory/factories/memory.factory';
+import { GetCoachMessageUseCase, GetWeeklyReviewUseCase } from '../use-cases/coach.use-cases';
+import { GenerateAdaptiveLessonUseCase } from '../use-cases/adaptive-lesson.use-cases';
+import { StudentProfileAdapter } from './student.adapter';
+import { StudentProfileData } from '../dto/student-profile.dto';
+import { DigitalTwinDTO } from '../dto/digital-twin.dto';
+import { UserProfile } from '../../../types/profile';
+import { ICoachAiService } from '../contracts/ai.contract';
+import { LongitudinalMemory } from '../../../types/coach';
 
 /**
  * UI-Safe View Model for the Dashboard.
@@ -43,7 +42,6 @@ export interface DashboardViewModelDTO {
     readonly confidenceScore: number;
     readonly fluencyLevel: string;
     readonly pronunciationMastery: number;
-    readonly activeVocabularyCount: number;
     readonly wordsLearnedCount: number;
     readonly grammarRulesMastered: number;
     readonly learningVelocity: 'alta' | 'moderada' | 'revisar_metas';
@@ -90,6 +88,8 @@ export interface DashboardViewModelDTO {
     readonly monthlyLimit: number;
     readonly remainingSessions: number;
   };
+  readonly coachMessage?: CoachMessageDTO;
+  readonly weeklyReview?: WeeklyReviewDTO;
   readonly dueVocabularyCount: number;
   readonly isFallback: boolean;
   readonly source: 'application_layer' | 'legacy_fallback';
@@ -133,67 +133,94 @@ export class DashboardAdapter {
     private readonly studyPlanRepo: IStudyPlanRepository,
     private readonly analyticsRepo: IAnalyticsRepository,
     private readonly subscriptionRepo: ISubscriptionRepository,
-    private readonly memoryRepo: IMemoryRepository
+    private readonly memoryRepo: IMemoryRepository,
+    private readonly studentProfileAdapter: StudentProfileAdapter,
+    private readonly coachAiService: ICoachAiService,
+    private readonly coachUseCase?: GetCoachMessageUseCase,
+    private readonly reviewUseCase?: GetWeeklyReviewUseCase,
+    private readonly adaptiveLessonUseCase?: GenerateAdaptiveLessonUseCase
   ) {}
 
   /**
    * Primary entry point for UI: fetches dashboard data via Application Query Handlers.
-   * Ensures student bootstrap in domain repositories if this is their first session.
    */
   public async getDashboardViewModel(
     studentId: string,
     fallbackProfile?: DashboardInputProfile
   ): Promise<DashboardViewModelDTO> {
     try {
-      // 1. Ensure student exists in repository or bootstrap from profile
-      await this.ensureStudentExists(studentId, fallbackProfile);
+      // 1. Ensure canonical profile and digital twin exist
+      if (fallbackProfile) {
+        // Ensure the onboarding profile is bound to the requested studentId if no ID is present
+        if (!fallbackProfile.id) {
+          fallbackProfile.id = studentId;
+        }
 
-      // 2. Dispatch query through Application Query Handlers
+        await this.studentProfileAdapter.saveOnboardingProfile(fallbackProfile as UserProfile);
+      }
+      
+      const canonical = await this.studentProfileAdapter.getCanonicalProfile(studentId);
+      const twin = await this.studentProfileAdapter.getDigitalTwin(studentId);
+
+      // 2. Dispatch remaining queries through Application Query Handlers
       const dashboardDto = await this.queryHandlers.getDashboard({ studentId });
 
-      // 3. Map DTO to clean UI ViewModel
-      return this.mapDtoToViewModel(dashboardDto, fallbackProfile);
+      // 3. Optional: Fetch adaptive coach data if use cases available
+      let coachMessage: CoachMessageDTO | undefined;
+      let weeklyReview: WeeklyReviewDTO | undefined;
+
+      if (this.coachUseCase && this.reviewUseCase) {
+        [coachMessage, weeklyReview] = await Promise.all([
+          this.coachUseCase.execute(studentId).catch(() => undefined),
+          this.reviewUseCase.execute(studentId).catch(() => undefined),
+        ]);
+      }
+
+      // 4. Map DTO to clean UI ViewModel
+      const vm = this.mapToViewModel(canonical, twin, dashboardDto);
+      return {
+        ...vm,
+        coachMessage,
+        weeklyReview,
+      };
     } catch (error) {
       console.warn('[DashboardAdapter] Error querying application layer, generating fallback view model:', error);
       return this.createFallbackViewModel(studentId, fallbackProfile);
     }
   }
 
-  /**
-   * Converts Application DashboardDTO into UI-ready ViewModel.
-   */
-  private mapDtoToViewModel(
-    dto: DashboardDTO,
-    profileInput?: DashboardInputProfile
+  private mapToViewModel(
+    profile: StudentProfileData,
+    twin: DigitalTwinDTO,
+    dashboardDto: DashboardDTO
   ): DashboardViewModelDTO {
-    const primaryLesson = dto.recommendedLessons[0];
-    const weeklyGoal = (dto.student.preferences.dailyGoalMinutes || 15) * 7;
-    const completedMins = dto.analytics.weeklyMinutes || 75;
+    const primaryLesson = dashboardDto.recommendedLessons[0];
+    const weeklyGoal = profile.preferences.weeklyGoalMinutes;
+    const completedMins = twin.progress.completedMinutesThisWeek;
 
     return {
       student: {
-        id: dto.student.id,
-        email: dto.student.email,
-        nativeLanguage: dto.student.nativeLanguage,
-        targetLanguages: dto.student.targetLanguages,
-        currentLevel: dto.student.currentLevel,
-        currentFocus: dto.student.currentFocus,
-        motivation: dto.student.motivation,
-        confidenceScore: profileInput?.confidence_score ?? dto.analytics.fluencyIndex.confidenceScore ?? 76,
-        streakDays: 5,
-        minutesPerDay: dto.student.preferences.dailyGoalMinutes,
-        preferredTeacher: dto.student.preferences.preferredTeacherPersona,
-        correctionStrictness: dto.student.preferences.correctionStrictness,
+        id: profile.id,
+        email: profile.email,
+        nativeLanguage: profile.nativeLanguage,
+        targetLanguages: profile.targetLanguages,
+        currentLevel: profile.currentLevel,
+        currentFocus: profile.objectives.currentFocus,
+        motivation: profile.objectives.primaryMotivation,
+        confidenceScore: twin.competencies.confidence,
+        streakDays: twin.progress.streakDays,
+        minutesPerDay: profile.preferences.dailyGoalMinutes,
+        preferredTeacher: profile.preferences.preferredTeacherPersona,
+        correctionStrictness: profile.preferences.correctionStrictness,
       },
       metrics: {
-        streakDays: 5,
-        confidenceScore: profileInput?.confidence_score ?? dto.analytics.fluencyIndex.confidenceScore ?? 76,
-        fluencyLevel: `${dto.student.currentLevel} Intermédio`,
-        pronunciationMastery: 88,
-        activeVocabularyCount: dto.analytics.wordsLearnedCount || 340,
-        wordsLearnedCount: dto.analytics.wordsLearnedCount || 340,
-        grammarRulesMastered: dto.analytics.grammarRulesMastered || 12,
-        learningVelocity: dto.analytics.learningVelocity || 'alta',
+        streakDays: twin.progress.streakDays,
+        confidenceScore: twin.competencies.confidence,
+        fluencyLevel: `${profile.currentLevel} Intermédio`,
+        pronunciationMastery: twin.competencies.pronunciation,
+        wordsLearnedCount: twin.progress.wordsLearnedCount,
+        grammarRulesMastered: dashboardDto.analytics.grammarRulesMastered || 12,
+        learningVelocity: dashboardDto.analytics.learningVelocity || 'alta',
       },
       nextLesson: primaryLesson
         ? {
@@ -206,7 +233,7 @@ export class DashboardAdapter {
             objectives: primaryLesson.objectives,
           }
         : undefined,
-      recommendedLessons: dto.recommendedLessons.map((l) => ({
+      recommendedLessons: dashboardDto.recommendedLessons.map((l) => ({
         id: l.id,
         title: l.title,
         targetLevel: l.targetLevel,
@@ -218,14 +245,14 @@ export class DashboardAdapter {
       weeklyCalendar: {
         weeklyGoalMinutes: weeklyGoal,
         completedMinutes: completedMins,
-        weeklySessions: dto.analytics.weeklySessions || 4,
+        weeklySessions: dashboardDto.analytics.weeklySessions || 4,
       },
-      activePlan: dto.activePlan
+      activePlan: dashboardDto.activePlan
         ? {
-            id: dto.activePlan.id,
-            primaryObjective: dto.activePlan.primaryObjective,
-            progressPercentage: dto.activePlan.progressPercentage,
-            missions: dto.activePlan.missions.map((m) => ({
+            id: dashboardDto.activePlan.id,
+            primaryObjective: dashboardDto.activePlan.primaryObjective,
+            progressPercentage: dashboardDto.activePlan.progressPercentage,
+            missions: dashboardDto.activePlan.missions.map((m) => ({
               id: m.id,
               title: m.title,
               description: m.description,
@@ -235,84 +262,16 @@ export class DashboardAdapter {
           }
         : undefined,
       subscription: {
-        planTier: dto.subscription.planTier,
-        status: dto.subscription.status,
-        sessionsUsedThisMonth: dto.subscription.sessionsUsedThisMonth,
-        monthlyLimit: dto.subscription.monthlyLimit,
-        remainingSessions: dto.subscription.remainingSessions,
+        planTier: dashboardDto.subscription.planTier,
+        status: dashboardDto.subscription.status,
+        sessionsUsedThisMonth: dashboardDto.subscription.sessionsUsedThisMonth,
+        monthlyLimit: dashboardDto.subscription.monthlyLimit,
+        remainingSessions: dashboardDto.subscription.remainingSessions,
       },
-      dueVocabularyCount: dto.dueVocabularyCount,
+      dueVocabularyCount: dashboardDto.dueVocabularyCount,
       isFallback: false,
       source: 'application_layer',
     };
-  }
-
-  /**
-   * Bootstraps the student in domain repositories if not yet seeded.
-   */
-  private async ensureStudentExists(studentId: string, profileInput?: DashboardInputProfile): Promise<void> {
-    const existing = await this.studentRepo.findById(StudentId.create(studentId));
-    if (existing) return;
-
-    const email = profileInput?.email || `${studentId}@fluento.ai`;
-    const nativeLang = profileInput?.nativeLanguage || profileInput?.native_language || 'pt';
-    const targetLangs = profileInput?.targetLanguages?.length
-      ? profileInput.targetLanguages
-      : profileInput?.target_languages?.length
-      ? profileInput.target_languages
-      : ['es'];
-    const focus = profileInput?.objectives?.currentFocus || profileInput?.current_focus || 'Apresentação Executiva & Negociação de Ideias';
-    const motivation = profileInput?.objectives?.primaryMotivation || profileInput?.motivation || 'Liderar reuniões internacionais e negociações com total fluência';
-    const minutes = profileInput?.preferences?.dailyGoalMinutes || profileInput?.minutes_per_day || 15;
-    const topics = profileInput?.interests || profileInput?.hobbies || ['Tecnologia', 'Viagens', 'Negócios'];
-
-    const student = StudentEntity.create(StudentId.create(studentId), {
-      email,
-      nativeLanguage: LanguageCode.create(nativeLang),
-      targetLanguages: targetLangs.map((c) => LanguageCode.create(c)),
-      currentLevel: CEFRLevel.create('B1'),
-      skillMatrix: SkillMatrix.defaultInitial(),
-      preferences: LearningPreferences.create({
-        dailyMinutes: minutes,
-        topics,
-      }),
-      currentFocus: focus,
-      motivation,
-      active: true,
-      createdAt: TimeStamp.now(),
-      updatedAt: TimeStamp.now(),
-    });
-    await this.studentRepo.save(student);
-
-    // Bootstrap StudyPlan
-    const existingPlan = await this.studyPlanRepo.findByStudentId(studentId);
-    if (!existingPlan) {
-      const plan = StudyPlanFactory.createDefaultPlanForStudent(studentId, focus);
-      await this.studyPlanRepo.save(plan);
-    }
-
-    // Bootstrap Analytics
-    const existingAnalytics = await this.analyticsRepo.findByStudentId(studentId);
-    if (!existingAnalytics) {
-      const analytics = AnalyticsFactory.createDefaultAnalytics(studentId);
-      await this.analyticsRepo.save(analytics);
-    }
-
-    // Bootstrap Subscription
-    const existingSub = await this.subscriptionRepo.findByStudentId(studentId);
-    if (!existingSub) {
-      const sub = SubscriptionFactory.createFreeSubscription(studentId);
-      await this.subscriptionRepo.save(sub);
-    }
-
-    // Bootstrap sample memory due words
-    const existingWords = await this.memoryRepo.findWordsByStudentId(studentId);
-    if (existingWords.length === 0) {
-      const w1 = MemoryFactory.createNewTrackedWord(studentId, 'sin embargo', 'no entanto', 'conectores');
-      const w2 = MemoryFactory.createNewTrackedWord(studentId, 'desarrollo', 'desenvolvimento', 'negócios');
-      await this.memoryRepo.saveWord(w1);
-      await this.memoryRepo.saveWord(w2);
-    }
   }
 
   /**
@@ -339,7 +298,6 @@ export class DashboardAdapter {
         confidenceScore: profileInput?.confidence_score || 76,
         fluencyLevel: 'B1 Intermédio',
         pronunciationMastery: 88,
-        activeVocabularyCount: 340,
         wordsLearnedCount: 340,
         grammarRulesMastered: 12,
         learningVelocity: 'alta',
@@ -389,5 +347,27 @@ export class DashboardAdapter {
       isFallback: true,
       source: 'legacy_fallback',
     };
+  }
+
+  /**
+   * Generates a new adaptive lesson for the student.
+   */
+  public async generateNewLesson(studentId: string): Promise<DetailedLessonDTO> {
+    if (!this.adaptiveLessonUseCase) {
+      throw new Error('Adaptive Lesson Use Case not configured in DashboardAdapter');
+    }
+    return this.adaptiveLessonUseCase.execute(studentId);
+  }
+
+  /**
+   * Retrieves monthly evolution analytics via Application Layer.
+   */
+  public async getMonthlyEvolutionData(
+    studentId: string,
+    fallbackProfile?: Partial<UserProfile>,
+    memory?: LongitudinalMemory
+  ): Promise<MonthlyEvolutionDataDTO> {
+    const profile = fallbackProfile || await this.studentProfileAdapter.getLegacyUserProfile(studentId);
+    return this.coachAiService.generateMonthlyEvolutionData(profile, memory);
   }
 }

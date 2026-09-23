@@ -44,6 +44,10 @@ export class AIRuntime {
       throw new Error('No available AI providers found');
     }
 
+    if (request.signal?.aborted) {
+      throw new Error('Request aborted');
+    }
+
     let lastError: Error | null = null;
     let fallbackOccurred = false;
 
@@ -55,6 +59,9 @@ export class AIRuntime {
     });
 
     for (let i = 0; i < providerChain.length; i++) {
+      if (request.signal?.aborted) {
+        throw new Error('Request aborted');
+      }
       const provider = providerChain[i];
       const providerName = provider.providerName;
       const modelName = request.modelName || provider.defaultModel;
@@ -138,6 +145,10 @@ export class AIRuntime {
     const provider = providerChain[0];
     const providerName = provider.providerName;
     const modelName = request.modelName || provider.defaultModel;
+
+    if (request.signal?.aborted) {
+      throw new Error('Request aborted');
+    }
 
     try {
       rateLimitManager.recordRequest(providerName);

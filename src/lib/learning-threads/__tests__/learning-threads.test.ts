@@ -84,7 +84,15 @@ export async function runLearningThreadsTestSuite() {
 
   // 4. Memory Consolidation Test
   // Add duplicate review item and matching success to resolve difficulty
-  learningThreadsRuntime.addReviewItem(studentId, 'resilient', 'vocabulary');
+  // Note: runtime facade already deduplicates, so we manually inject a duplicate to test consolidator's safety net
+  const preSnapshot = learningThreadsRuntime.getSnapshot(studentId);
+  if (preSnapshot.reviewItems.length > 0) {
+    const duplicate = { ...preSnapshot.reviewItems[0], id: 'srs_dupe_test' };
+    preSnapshot.reviewItems.push(duplicate);
+    // @ts-ignore - bypassing facade to test internal consolidator safety net
+    threadManager.saveSnapshot(preSnapshot);
+  }
+
   learningThreadsRuntime.recordDifficultyMemory(studentId, 'Uso Incorreto de Phrasal Verbs', 'Dificuldade com phrasal verbs');
   learningThreadsRuntime.addSuccessMemory(studentId, 'Uso Incorreto de Phrasal Verbs', 'Demonstrou domínio total do Uso Incorreto de Phrasal Verbs');
 

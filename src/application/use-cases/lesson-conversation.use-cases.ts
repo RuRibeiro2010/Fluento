@@ -7,7 +7,6 @@ import { StudentProfileSyncService } from '../services/student-profile-sync.serv
 import {
   ConversationSessionEntity,
   ConversationSessionData,
-  ConversationMessage,
 } from '../../domain/session/entities/conversation-session.entity';
 import { SessionEntity } from '../../domain/session/entities/session.entity';
 import { SessionId } from '../../domain/session/value-objects/session-id.vo';
@@ -22,8 +21,7 @@ import {
   LessonSessionContextDTO,
   LessonSessionSummaryDTO,
 } from '../dto/conversation.dtos';
-import { conversationPromptBuilder } from '../services/conversation-prompt-builder.service';
-import { generateAiText, streamAiText, AiClientError } from '../../lib/api/ai-client';
+import { IConversationAiService } from '../contracts/ai.contract';
 import { applicationTelemetry } from '../telemetry/telemetry.service';
 
 export interface StartLessonConversationCommand {
@@ -63,11 +61,8 @@ export class LessonConversationUseCase {
     // browser reload (Sprint 16A.5). Isolated behind an interface so the
     // storage engine can change later without touching this use-case.
     private readonly sessionStorageGateway: IConversationSessionStorageGateway,
-    // Optional injector for AI client call (for seamless unit testing)
-    private readonly aiClientCaller?: {
-      generate: typeof generateAiText;
-      stream: typeof streamAiText;
-    }
+    // Dedicated AI service for pedagogical conversation
+    private readonly conversationAiService: IConversationAiService
   ) {}
 
   /**
@@ -177,7 +172,7 @@ export class LessonConversationUseCase {
 
       this.activeSessions.set(sessionId, sessionEntity);
 
-      // 3. Build pedagogical opening prompt
+      // 3. Build pedagogical context for AI
       const lessonContext: LessonSessionContextDTO = {
         lessonId,
         topic: lessonTitle,
@@ -189,25 +184,15 @@ export class LessonConversationUseCase {
         conversationHistory: [],
       };
 
-      const promptData = conversationPromptBuilder.buildGreetingPrompt(
-        studentContext,
-        lessonContext
-      );
-
-      // 4. Request initial greeting from safe server AI API proxy
-      const generateFn = this.aiClientCaller?.generate || generateAiText;
-
+      // 4. Request initial greeting from AI Runtime via port
       try {
-        const aiResponse = await generateFn({
-          prompt: promptData.prompt,
-          systemInstruction: promptData.systemInstruction,
-          temperature: 0.7,
-          maxTokens: 250,
-          sessionId,
-          studentId,
-        });
+        const greetingContent = await this.conversationAiService.generateGreeting(
+          studentContext,
+          lessonContext,
+          sessionId
+        );
 
-        sessionEntity.addTeacherMessage(aiResponse.content, {
+        sessionEntity.addTeacherMessage(greetingContent, {
           type: 'greeting',
           tip: '💡 Dica do Professor: Responde na língua alvo demonstrando clareza e cortesia.',
         });
@@ -217,20 +202,15 @@ export class LessonConversationUseCase {
         this.logger.info(`Session ${sessionId} successfully started with AI greeting.`);
         applicationTelemetry.endSpan(span, true);
       } catch (aiErr: any) {
+        // Handle AI_NOT_CONFIGURED and other failures
         if (
-          aiErr instanceof AiClientError &&
-          (aiErr.status === 503 || aiErr.code === 'AI_PROVIDER_NOT_CONFIGURED')
+          aiErr?.message?.includes('AI_PROVIDER_NOT_CONFIGURED') ||
+          aiErr?.message?.includes('GEMINI_API_KEY') ||
+          aiErr?.status === 503
         ) {
           this.logger.warn(`AI Provider is not configured on the server. Setting AI_NOT_CONFIGURED.`);
           sessionEntity.markAiNotConfigured(
             'O servidor do Fluento não tem a chave GEMINI_API_KEY configurada. O AI Runtime encontra-se desligado em modo seguro.'
-          );
-        } else if (
-          aiErr?.message?.includes('AI_PROVIDER_NOT_CONFIGURED') ||
-          aiErr?.message?.includes('GEMINI_API_KEY')
-        ) {
-          sessionEntity.markAiNotConfigured(
-            'O servidor do Fluento não tem a chave GEMINI_API_KEY configurada.'
           );
         } else {
           this.logger.error(`Failed to generate initial AI greeting: ${aiErr.message}`);
@@ -257,7 +237,7 @@ export class LessonConversationUseCase {
     command: SendStudentMessageCommand
   ): Promise<{
     session: ConversationSessionDTO;
-    teacherMessage?: ConversationMessage;
+    teacherMessage?: ConversationMessageDTO;
   }> {
     const session = this.activeSessions.get(command.sessionId);
     if (!session) {
@@ -315,64 +295,17 @@ export class LessonConversationUseCase {
       })),
     };
 
-    const promptData = conversationPromptBuilder.buildTurnPrompt(
-      studentContext,
-      lessonContext,
-      trimmedInput
-    );
-
-    // 3. Call AI Runtime via safe client proxy
+    // 3. Call AI Runtime via port
     try {
-      let teacherResponseText = '';
+      const responseContent = await this.conversationAiService.generateResponse(
+        studentContext,
+        lessonContext,
+        trimmedInput,
+        session.id,
+        command.onStreamChunk
+      );
 
-      if (command.onStreamChunk && this.aiClientCaller?.stream) {
-        const res = await this.aiClientCaller.stream(
-          {
-            prompt: promptData.prompt,
-            systemInstruction: promptData.systemInstruction,
-            temperature: 0.7,
-            maxTokens: 300,
-            sessionId: session.id,
-            studentId: session.studentId,
-          },
-          (chunk) => {
-            if (chunk.delta && command.onStreamChunk) {
-              command.onStreamChunk(chunk.delta);
-            }
-          }
-        );
-        teacherResponseText = res.content;
-      } else if (command.onStreamChunk) {
-        const res = await streamAiText(
-          {
-            prompt: promptData.prompt,
-            systemInstruction: promptData.systemInstruction,
-            temperature: 0.7,
-            maxTokens: 300,
-            sessionId: session.id,
-            studentId: session.studentId,
-          },
-          (chunk) => {
-            if (chunk.delta && command.onStreamChunk) {
-              command.onStreamChunk(chunk.delta);
-            }
-          }
-        );
-        teacherResponseText = res.content;
-      } else {
-        const generateFn = this.aiClientCaller?.generate || generateAiText;
-        const res = await generateFn({
-          prompt: promptData.prompt,
-          systemInstruction: promptData.systemInstruction,
-          temperature: 0.7,
-          maxTokens: 300,
-          sessionId: session.id,
-          studentId: session.studentId,
-        });
-        teacherResponseText = res.content;
-      }
-
-      const teacherMsg = session.addTeacherMessage(teacherResponseText, {
+      const teacherMsg = session.addTeacherMessage(responseContent, {
         type: 'utterance',
       });
       session.setState('active');
@@ -388,10 +321,9 @@ export class LessonConversationUseCase {
       };
     } catch (err: any) {
       if (
-        (err instanceof AiClientError &&
-          (err.status === 503 || err.code === 'AI_PROVIDER_NOT_CONFIGURED')) ||
         err?.message?.includes('AI_PROVIDER_NOT_CONFIGURED') ||
-        err?.message?.includes('GEMINI_API_KEY')
+        err?.message?.includes('GEMINI_API_KEY') ||
+        err?.status === 503
       ) {
         session.markAiNotConfigured(
           'O servidor do Fluento não tem a chave GEMINI_API_KEY configurada. O AI Runtime encontra-se desligado em modo seguro.'

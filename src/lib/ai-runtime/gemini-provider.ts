@@ -7,6 +7,7 @@
 
 import { AIProvider } from './provider-interface';
 import { ModelRequest, ModelResponse, StreamChunk, SupportedProvider } from './types';
+import { estimateCost } from './pricing';
 
 export class GeminiProvider implements AIProvider {
   public readonly providerName: SupportedProvider = 'gemini';
@@ -86,7 +87,7 @@ export class GeminiProvider implements AIProvider {
     const promptTokens = Math.ceil((request.prompt.length + (request.systemInstruction?.length || 0)) / 3.8);
     const completionTokens = Math.ceil(textContent.length / 3.8);
     const totalTokens = promptTokens + completionTokens;
-    const estimatedCostUsd = (promptTokens / 1000) * 0.000075 + (completionTokens / 1000) * 0.0003;
+    const estimatedCostUsd = estimateCost(model, promptTokens, completionTokens);
 
     return {
       requestId: reqId,
@@ -138,6 +139,9 @@ export class GeminiProvider implements AIProvider {
         });
 
         for await (const chunk of responseStream) {
+          if (request.signal?.aborted) {
+            break;
+          }
           const delta = chunk.text || '';
           fullContent += delta;
           onChunk({
@@ -181,7 +185,7 @@ export class GeminiProvider implements AIProvider {
     const promptTokens = Math.ceil((request.prompt.length + (request.systemInstruction?.length || 0)) / 3.8);
     const completionTokens = Math.ceil(fullContent.length / 3.8);
     const totalTokens = promptTokens + completionTokens;
-    const estimatedCostUsd = (promptTokens / 1000) * 0.000075 + (completionTokens / 1000) * 0.0003;
+    const estimatedCostUsd = estimateCost(model, promptTokens, completionTokens);
 
     return {
       requestId: reqId,

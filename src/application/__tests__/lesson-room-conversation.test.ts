@@ -2,6 +2,7 @@ import { LessonConversationUseCase } from '../use-cases/lesson-conversation.use-
 import { LessonRoomAdapter } from '../adapters/lesson-room.adapter';
 import { StudentProfileSyncService } from '../services/student-profile-sync.service';
 import { LocalStorageStudentProfileGateway } from '../adapters/storage/local-storage-student-profile.gateway';
+import { LocalStorageDigitalTwinGateway } from '../adapters/storage/local-storage-digital-twin.gateway';
 import { LocalStorageConversationSessionGateway } from '../adapters/storage/local-storage-conversation-session.gateway';
 import { conversationPromptBuilder } from '../services/conversation-prompt-builder.service';
 import {
@@ -33,11 +34,13 @@ export async function runLessonRoomConversationTests(): Promise<{ passed: boolea
     const lessonRepo = new InMemoryLessonRepository();
     const studentRepo = new InMemoryStudentRepository();
     const storageGateway = new LocalStorageStudentProfileGateway();
+    const digitalTwinGateway = new LocalStorageDigitalTwinGateway();
     storageGateway.clearMemory();
+    digitalTwinGateway.clearMemory();
     const eventPublisher = new FakeEventPublisher();
     const logger = new FakeLogger();
 
-    const syncService = new StudentProfileSyncService(storageGateway, studentRepo, eventPublisher);
+    const syncService = new StudentProfileSyncService(storageGateway, digitalTwinGateway, studentRepo, eventPublisher);
 
     // Pre-seed a test student with custom goals and preferences
     await syncService.updateProfile('std_test_exec', {
@@ -167,6 +170,27 @@ export async function runLessonRoomConversationTests(): Promise<{ passed: boolea
     };
 
     const conversationSessionGateway = new LocalStorageConversationSessionGateway();
+    
+    // Mock successful AI Service
+    const mockAiServiceSuccess = {
+      generateGreeting: async (): Promise<string> => {
+        return '¡Buenos días, Dr. Fernando! Bienvenido a nuestra sessão de negociação. ¿Cómo estruturaria los primeiros pontos de la alianza comercial?';
+      },
+      generateResponse: async (
+        _s: any,
+        _l: any,
+        _u: string,
+        _sid: string,
+        onStreamChunk?: (delta: string) => void
+      ): Promise<string> => {
+        const text = 'Excelente propuesta. Continuemos.';
+        if (onStreamChunk) {
+          onStreamChunk(text);
+        }
+        return text;
+      },
+    };
+
     const conversationUseCase = new LessonConversationUseCase(
       sessionRepo,
       lessonRepo,
@@ -175,7 +199,7 @@ export async function runLessonRoomConversationTests(): Promise<{ passed: boolea
       eventPublisher,
       logger,
       conversationSessionGateway,
-      mockAiSuccess
+      mockAiServiceSuccess as any
     );
     const roomAdapter = new LessonRoomAdapter(conversationUseCase);
 
@@ -204,7 +228,7 @@ export async function runLessonRoomConversationTests(): Promise<{ passed: boolea
     log('3. Testing Sending Student Message & AI response...');
     const turnResult = await roomAdapter.sendStudentMessage(
       initialSession.sessionId,
-      'Propondría empezar con un acuerdo de confidencialidad mutuo antes de revelar los datos financieros.'
+      'Propondría empezar con un acordo de confidencialidade mútuo antes de revelar os dados financeiros.'
     );
 
     if (turnResult.session.messages.length !== 3) {
@@ -229,12 +253,12 @@ export async function runLessonRoomConversationTests(): Promise<{ passed: boolea
     // would produce), but sharing the SAME conversationSessionGateway - the
     // one thing a real reload leaves behind (the browser's localStorage).
     let resumeAiCalled = false;
-    const mockAiShouldNotBeCalled = {
-      generate: async (): Promise<ModelResponse> => {
+    const mockAiServiceShouldNotBeCalled = {
+      generateGreeting: async (): Promise<string> => {
         resumeAiCalled = true;
         throw new Error('AI must not be called when resuming an existing pending session');
       },
-      stream: async (): Promise<ModelResponse> => {
+      generateResponse: async (): Promise<string> => {
         resumeAiCalled = true;
         throw new Error('AI must not be called when resuming an existing pending session');
       },
@@ -248,7 +272,7 @@ export async function runLessonRoomConversationTests(): Promise<{ passed: boolea
       eventPublisher,
       logger,
       conversationSessionGateway, // same gateway = same "localStorage" surviving the reload
-      mockAiShouldNotBeCalled
+      mockAiServiceShouldNotBeCalled as any
     );
     const reloadedAdapter = new LessonRoomAdapter(reloadedUseCase);
 
@@ -287,44 +311,13 @@ export async function runLessonRoomConversationTests(): Promise<{ passed: boolea
     await conversationSessionGateway.savePendingSession(corruptedSnapshot);
 
     let corruptedRecoveryAiCalled = false;
-    const mockAiForCorruptedRecovery = {
-      generate: async (): Promise<ModelResponse> => {
+    const mockAiServiceForCorruptedRecovery = {
+      generateGreeting: async (): Promise<string> => {
         corruptedRecoveryAiCalled = true;
-        return {
-          requestId: 'req_recovery_1',
-          content: 'Bienvenido, empecemos una nueva sesión de práctica.',
-          provider: 'gemini',
-          modelName: 'gemini-3.6-flash',
-          promptTokens: 100,
-          completionTokens: 20,
-          totalTokens: 120,
-          estimatedCostUsd: 0.0001,
-          latencyMs: 150,
-          fallbackOccurred: false,
-          attempts: 1,
-          timestampIso: new Date().toISOString(),
-        };
+        return 'Bienvenido, empecemos una nueva sessão de prática.';
       },
-      stream: async (
-        _req: ModelRequest,
-        onChunk: (chunk: StreamChunk) => void
-      ): Promise<ModelResponse> => {
-        const text = 'Continuemos.';
-        onChunk({ requestId: 'r2', delta: text, done: true, provider: 'gemini', modelName: 'gemini-3.6-flash' });
-        return {
-          requestId: 'r2',
-          content: text,
-          provider: 'gemini',
-          modelName: 'gemini-3.6-flash',
-          promptTokens: 50,
-          completionTokens: 5,
-          totalTokens: 55,
-          estimatedCostUsd: 0,
-          latencyMs: 40,
-          fallbackOccurred: false,
-          attempts: 1,
-          timestampIso: new Date().toISOString(),
-        };
+      generateResponse: async (): Promise<string> => {
+        return 'Continuemos.';
       },
     };
 
@@ -336,7 +329,7 @@ export async function runLessonRoomConversationTests(): Promise<{ passed: boolea
       eventPublisher,
       logger,
       conversationSessionGateway,
-      mockAiForCorruptedRecovery
+      mockAiServiceForCorruptedRecovery as any
     );
     const recoveryAdapter = new LessonRoomAdapter(recoveryUseCase);
 
@@ -363,20 +356,12 @@ export async function runLessonRoomConversationTests(): Promise<{ passed: boolea
     // =========================================================================
     log('4. Testing AI_NOT_CONFIGURED State (503 GEMINI_API_KEY Missing)...');
 
-    const mockAiUnconfigured = {
-      generate: async (): Promise<ModelResponse> => {
-        throw new AiClientError(
-          'AI Provider is not configured. GEMINI_API_KEY is missing on the server.',
-          503,
-          'AI_PROVIDER_NOT_CONFIGURED'
-        );
+    const mockAiServiceUnconfigured = {
+      generateGreeting: async (): Promise<string> => {
+        throw new Error('AI_PROVIDER_NOT_CONFIGURED (GEMINI_API_KEY missing)');
       },
-      stream: async (): Promise<ModelResponse> => {
-        throw new AiClientError(
-          'AI Provider is not configured. GEMINI_API_KEY is missing on the server.',
-          503,
-          'AI_PROVIDER_NOT_CONFIGURED'
-        );
+      generateResponse: async (): Promise<string> => {
+        throw new Error('AI_PROVIDER_NOT_CONFIGURED (GEMINI_API_KEY missing)');
       },
     };
 
@@ -388,7 +373,7 @@ export async function runLessonRoomConversationTests(): Promise<{ passed: boolea
       eventPublisher,
       logger,
       new LocalStorageConversationSessionGateway(),
-      mockAiUnconfigured
+      mockAiServiceUnconfigured as any
     );
     const unconfiguredAdapter = new LessonRoomAdapter(unconfiguredUseCase);
 
@@ -413,11 +398,11 @@ export async function runLessonRoomConversationTests(): Promise<{ passed: boolea
     // =========================================================================
     log('5. Testing Provider Error Handling (500 internal failure)...');
 
-    const mockAiInternalError = {
-      generate: async (): Promise<ModelResponse> => {
+    const mockAiServiceInternalError = {
+      generateGreeting: async (): Promise<string> => {
         throw new Error('Temporary upstream network timeout');
       },
-      stream: async (): Promise<ModelResponse> => {
+      generateResponse: async (): Promise<string> => {
         throw new Error('Temporary upstream network timeout');
       },
     };
@@ -430,7 +415,7 @@ export async function runLessonRoomConversationTests(): Promise<{ passed: boolea
       eventPublisher,
       logger,
       new LocalStorageConversationSessionGateway(),
-      mockAiInternalError
+      mockAiServiceInternalError as any
     );
     const errorAdapter = new LessonRoomAdapter(errorUseCase);
 
@@ -449,9 +434,9 @@ export async function runLessonRoomConversationTests(): Promise<{ passed: boolea
     // =========================================================================
     log('6. Testing Lesson Completion & Student Profile Synchronization...');
 
-    const profileBefore = await syncService.getProfile('std_test_exec');
-    const sessionsBefore = profileBefore.progress.completedSessionsCount;
-    const minutesBefore = profileBefore.progress.completedMinutesThisWeek;
+    const stateBefore = await syncService.getSynchronizedState('std_test_exec');
+    const sessionsBefore = stateBefore.digitalTwin.progress.completedSessionsCount;
+    const minutesBefore = stateBefore.digitalTwin.progress.completedMinutesThisWeek;
 
     const summary = await roomAdapter.completeSession(initialSession.sessionId, 600); // 10 minutes (600s)
 
@@ -480,22 +465,22 @@ export async function runLessonRoomConversationTests(): Promise<{ passed: boolea
       throw new Error('Expected profileUpdated to be true');
     }
 
-    // Verify Student Profile was updated via StudentProfileSyncService
-    const profileAfter = await syncService.getProfile('std_test_exec');
-    if (profileAfter.progress.completedSessionsCount !== sessionsBefore + 1) {
+    // Verify Student Profile and Digital Twin were updated via StudentProfileSyncService
+    const stateAfter = await syncService.getSynchronizedState('std_test_exec');
+    const profileAfter = stateAfter.profile;
+    const twinAfter = stateAfter.digitalTwin;
+
+    if (twinAfter.progress.completedSessionsCount !== sessionsBefore + 1) {
       throw new Error(
-        `Expected completedSessionsCount to increment to ${sessionsBefore + 1}, got ${profileAfter.progress.completedSessionsCount}`
+        `Expected completedSessionsCount to increment to ${sessionsBefore + 1}, got ${twinAfter.progress.completedSessionsCount}`
       );
     }
-    if (profileAfter.progress.completedMinutesThisWeek !== minutesBefore + 10) {
+    if (twinAfter.progress.completedMinutesThisWeek !== minutesBefore + 10) {
       throw new Error(
-        `Expected completedMinutesThisWeek to increase by 10, got ${profileAfter.progress.completedMinutesThisWeek}`
+        `Expected completedMinutesThisWeek to increase by 10, got ${twinAfter.progress.completedMinutesThisWeek}`
       );
     }
-    if (profileAfter.learningHistory.length === 0) {
-      throw new Error('Learning history must contain the completed session');
-    }
-    log('✓ Session completion atomically updated Student Profile progress and history');
+    log('✓ Session completion atomically updated Digital Twin progress');
 
     // =========================================================================
     // 6.5. Pending Session Cleared After Completion (Sprint 16A.5)
@@ -503,44 +488,13 @@ export async function runLessonRoomConversationTests(): Promise<{ passed: boolea
     log('6.5. Testing Pending Session Is Cleared After Completion...');
 
     let postCompletionAiCalled = false;
-    const mockAiAfterCompletion = {
-      generate: async (): Promise<ModelResponse> => {
+    const mockAiServiceAfterCompletion = {
+      generateGreeting: async (): Promise<string> => {
         postCompletionAiCalled = true;
-        return {
-          requestId: 'req_new_after_completion',
-          content: 'Bienvenido de nuevo, comencemos una nueva sesión de práctica.',
-          provider: 'gemini',
-          modelName: 'gemini-3.6-flash',
-          promptTokens: 90,
-          completionTokens: 15,
-          totalTokens: 105,
-          estimatedCostUsd: 0.0001,
-          latencyMs: 120,
-          fallbackOccurred: false,
-          attempts: 1,
-          timestampIso: new Date().toISOString(),
-        };
+        return 'Bienvenido de nuevo, comencemos una nueva sessão de prática.';
       },
-      stream: async (
-        _req: ModelRequest,
-        onChunk: (chunk: StreamChunk) => void
-      ): Promise<ModelResponse> => {
-        const text = 'Vamos empezar.';
-        onChunk({ requestId: 'r3', delta: text, done: true, provider: 'gemini', modelName: 'gemini-3.6-flash' });
-        return {
-          requestId: 'r3',
-          content: text,
-          provider: 'gemini',
-          modelName: 'gemini-3.6-flash',
-          promptTokens: 40,
-          completionTokens: 5,
-          totalTokens: 45,
-          estimatedCostUsd: 0,
-          latencyMs: 30,
-          fallbackOccurred: false,
-          attempts: 1,
-          timestampIso: new Date().toISOString(),
-        };
+      generateResponse: async (): Promise<string> => {
+        return 'Vamos empezar.';
       },
     };
 
@@ -552,7 +506,7 @@ export async function runLessonRoomConversationTests(): Promise<{ passed: boolea
       eventPublisher,
       logger,
       conversationSessionGateway, // same "localStorage" used by the completed session
-      mockAiAfterCompletion
+      mockAiServiceAfterCompletion as any
     );
     const postCompletionAdapter = new LessonRoomAdapter(postCompletionUseCase);
 

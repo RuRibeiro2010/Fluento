@@ -1,5 +1,6 @@
 import React from 'react';
 import { Flame, Award, Mic, BookOpen, TrendingUp, Sparkles } from 'lucide-react';
+import { Card, Heading2, Heading3, CaptionText } from '@/src/components/design-system';
 
 interface MetricsOverviewGridProps {
   streakDays?: number;
@@ -19,61 +20,61 @@ export function MetricsOverviewGrid({
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
       {/* 1. Streak */}
-      <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 hover:border-amber-500/40 transition space-y-2">
-        <div className="flex items-center justify-between text-xs text-slate-400">
-          <span>Ofensiva (Streak)</span>
+      <Card hoverable className="p-4 space-y-2">
+        <div className="flex items-center justify-between">
+          <CaptionText>Ofensiva (Streak)</CaptionText>
           <Flame className="w-4 h-4 text-amber-400 fill-amber-400" />
         </div>
-        <div className="text-2xl font-black text-white">{streakDays} Dias</div>
+        <Heading2 className="text-white font-black">{streakDays} Dias</Heading2>
         <div className="text-[11px] text-emerald-400 font-medium">Meta diária ativa</div>
-      </div>
+      </Card>
 
       {/* 2. Confiança */}
-      <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 hover:border-indigo-500/40 transition space-y-2">
-        <div className="flex items-center justify-between text-xs text-slate-400">
-          <span>Confiança</span>
+      <Card hoverable className="p-4 space-y-2">
+        <div className="flex items-center justify-between">
+          <CaptionText>Confiança</CaptionText>
           <Award className="w-4 h-4 text-indigo-400" />
         </div>
-        <div className="text-2xl font-black text-indigo-300">{confidenceScore}%</div>
+        <Heading2 className="text-indigo-300 font-black">{confidenceScore}%</Heading2>
         <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
           <div
             className="bg-indigo-500 h-1.5 rounded-full"
             style={{ width: `${Math.min(100, Math.max(5, confidenceScore))}%` }}
           />
         </div>
-      </div>
+      </Card>
 
       {/* 3. Fluência */}
-      <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 hover:border-purple-500/40 transition space-y-2">
-        <div className="flex items-center justify-between text-xs text-slate-400">
-          <span>Fluência</span>
+      <Card hoverable className="p-4 space-y-2">
+        <div className="flex items-center justify-between">
+          <CaptionText>Fluência</CaptionText>
           <TrendingUp className="w-4 h-4 text-purple-400" />
         </div>
-        <div className="text-xl font-bold text-white truncate">{fluencyLevel}</div>
+        <Heading3 className="text-white truncate font-bold">{fluencyLevel}</Heading3>
         <div className="text-[11px] text-purple-400 font-medium flex items-center gap-1">
           <Sparkles className="w-3 h-3" /> CEFR Adaptativo
         </div>
-      </div>
+      </Card>
 
       {/* 4. Pronúncia */}
-      <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 hover:border-emerald-500/40 transition space-y-2">
-        <div className="flex items-center justify-between text-xs text-slate-400">
-          <span>Pronúncia</span>
+      <Card hoverable className="p-4 space-y-2">
+        <div className="flex items-center justify-between">
+          <CaptionText>Pronúncia</CaptionText>
           <Mic className="w-4 h-4 text-emerald-400" />
         </div>
-        <div className="text-2xl font-black text-emerald-300">{pronunciationMastery}%</div>
+        <Heading2 className="text-emerald-300 font-black">{pronunciationMastery}%</Heading2>
         <div className="text-[11px] text-slate-400">Acoustic Precision</div>
-      </div>
+      </Card>
 
       {/* 5. Vocabulário */}
-      <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 hover:border-amber-500/40 transition space-y-2">
-        <div className="flex items-center justify-between text-xs text-slate-400">
-          <span>Vocabulário</span>
+      <Card hoverable className="p-4 space-y-2">
+        <div className="flex items-center justify-between">
+          <CaptionText>Vocabulário</CaptionText>
           <BookOpen className="w-4 h-4 text-amber-400" />
         </div>
-        <div className="text-2xl font-black text-amber-200">{activeVocabularyCount}</div>
+        <Heading2 className="text-amber-200 font-black">{activeVocabularyCount}</Heading2>
         <div className="text-[11px] text-slate-400">Palavras ativas</div>
-      </div>
+      </Card>
     </div>
   );
 }

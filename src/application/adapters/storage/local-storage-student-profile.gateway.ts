@@ -1,17 +1,17 @@
 import { IStudentProfileStorageGateway } from '../../contracts/student-storage.contract';
-import { StudentProfileData } from '../../../domain/student/entities/student-profile.entity';
+import { StudentProfileDomainData } from '../../../domain/student/entities/student-profile.entity';
 import { StudentProfileMapper } from '../../mappers/student-profile.mapper';
 import { studentDigitalTwin } from '../../../lib/student-digital-twin';
 import { UserProfile } from '../../../../types/profile';
 
 export class LocalStorageStudentProfileGateway implements IStudentProfileStorageGateway {
-  private inMemoryFallback: Map<string, StudentProfileData> = new Map();
+  private inMemoryFallback: Map<string, StudentProfileDomainData> = new Map();
 
   private isBrowser(): boolean {
     return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
   }
 
-  public async loadProfile(studentId: string): Promise<StudentProfileData | null> {
+  public async loadProfile(studentId: string): Promise<StudentProfileDomainData | null> {
     // 1. Check in-memory store
     if (this.inMemoryFallback.has(studentId)) {
       return this.inMemoryFallback.get(studentId)!;
@@ -26,7 +26,7 @@ export class LocalStorageStudentProfileGateway implements IStudentProfileStorage
       const canonicalKey = `fluento_student_profile_${studentId}`;
       const rawCanonical = window.localStorage.getItem(canonicalKey);
       if (rawCanonical) {
-        const parsed = JSON.parse(rawCanonical) as StudentProfileData;
+        const parsed = JSON.parse(rawCanonical) as StudentProfileDomainData;
         this.inMemoryFallback.set(studentId, parsed);
         return parsed;
       }
@@ -36,22 +36,25 @@ export class LocalStorageStudentProfileGateway implements IStudentProfileStorage
       if (rawLegacy) {
         const parsedLegacy = JSON.parse(rawLegacy) as UserProfile;
         if (!parsedLegacy.id || parsedLegacy.id === studentId || studentId === 'usr_fluento_primary' || studentId === 'demo-user') {
-          const migrated = StudentProfileMapper.legacyToProfile(parsedLegacy);
+          const migratedDTO = StudentProfileMapper.legacyToProfile(parsedLegacy);
+          // Convert DTO to Domain Data for the gateway's contract
+          const domainData: StudentProfileDomainData = {
+            ...migratedDTO,
+            updatedAtIso: migratedDTO.updatedAtIso || new Date().toISOString(),
+            createdAtIso: migratedDTO.createdAtIso || new Date().toISOString(),
+          } as any; 
+          
           // Persist the migrated profile for future canonical access
-          await this.saveProfile(migrated);
-          return migrated;
+          await this.saveProfile(domainData);
+          return domainData;
         }
       }
 
       // 4. Fallback: Check existing Digital Twin snapshot
       const rawTwin = window.localStorage.getItem(`fluento_twin_${studentId}`);
       if (rawTwin) {
-        const parsedTwin = JSON.parse(rawTwin);
-        if (parsedTwin.identity && parsedTwin.language) {
-          const profileFromTwin = StudentProfileMapper.twinToProfile(parsedTwin);
-          await this.saveProfile(profileFromTwin);
-          return profileFromTwin;
-        }
+        // Legacy fallback from old twin structure is now handled via onboarding/sync service
+        // No direct profile restoration from twin here to maintain strict domain boundaries
       }
     } catch (err) {
       console.warn('[LocalStorageStudentProfileGateway] Error reading profile from storage:', err);
@@ -60,11 +63,10 @@ export class LocalStorageStudentProfileGateway implements IStudentProfileStorage
     return null;
   }
 
-  public async saveProfile(profile: StudentProfileData): Promise<void> {
-    const updatedProfile: StudentProfileData = {
+  public async saveProfile(profile: StudentProfileDomainData): Promise<void> {
+    const updatedProfile: StudentProfileDomainData = {
       ...profile,
       updatedAtIso: new Date().toISOString(),
-      lastSyncedAtIso: new Date().toISOString(),
     };
 
     // 1. Update in-memory fallback
@@ -77,17 +79,10 @@ export class LocalStorageStudentProfileGateway implements IStudentProfileStorage
         window.localStorage.setItem(canonicalKey, JSON.stringify(updatedProfile));
 
         // 3. Backward Compatibility: Synchronize legacy fluento_user_profile
-        const legacyProfile = StudentProfileMapper.profileToLegacy(updatedProfile);
+        const legacyProfile = StudentProfileMapper.profileToLegacy(updatedProfile as any);
         window.localStorage.setItem('fluento_user_profile', JSON.stringify(legacyProfile));
 
-        // 4. Backward Compatibility: Synchronize Digital Twin state
-        try {
-          const partialTwin = StudentProfileMapper.profileToTwin(updatedProfile);
-          studentDigitalTwin.updateTwin(profile.id, partialTwin);
-        } catch (twinErr) {
-          // If twin doesn't exist yet, getOrCreateTwin will initialize it
-          studentDigitalTwin.getOrCreateTwin(profile.id, profile.name, profile.email);
-        }
+        // 4. Digital Twin synchronization is now handled by StudentProfileSyncService in the application layer
       } catch (err) {
         console.warn('[LocalStorageStudentProfileGateway] Error persisting profile to localStorage:', err);
       }

@@ -1,4 +1,4 @@
-import { StudentProfileData } from '../../domain/student/entities/student-profile.entity';
+import { StudentProfileData } from '../dto/student-profile.dto';
 import { UserProfile } from '../../../types/profile';
 import { StudentDigitalTwinState } from '../../lib/student-digital-twin/types';
 import { CEFRLevel } from '../../../types/brain';
@@ -35,12 +35,17 @@ export class StudentProfileMapper {
         ? 'gentle'
         : 'balanced';
 
-    const pace: 'relaxed' | 'moderate' | 'intensive' =
+    const pace: 'slow' | 'moderate' | 'fast' =
       legacy.learning_preferences?.pace === 'intensive'
-        ? 'intensive'
+        ? 'fast'
         : legacy.learning_preferences?.pace === 'relaxed'
-        ? 'relaxed'
+        ? 'slow'
         : 'moderate';
+
+    const learningStyleRaw = legacy.learning_style || 'interactive';
+    const learningStyle: 'auditory' | 'visual' | 'interactive' | 'reflective' = 
+      learningStyleRaw === 'visual' ? 'visual' :
+      learningStyleRaw === 'auditory' ? 'auditory' : 'interactive';
 
     const dailyMinutes = legacy.minutes_per_day || 15;
     const weeklyGoalMinutes = legacy.weekly_goal ? legacy.weekly_goal * dailyMinutes : 60;
@@ -66,35 +71,8 @@ export class StudentProfileMapper {
         preferredTeacherPersona: legacy.coach_personality || 'Prof. Sofia',
         correctionStrictness,
         pace,
-        learningStyle: (legacy.learning_style as any) || 'interactive',
+        learningStyle,
       },
-      competencies: {
-        speaking: matrix.speaking ?? 70,
-        listening: matrix.listening ?? 75,
-        reading: matrix.reading ?? 80,
-        writing: matrix.writing ?? 68,
-        grammar: matrix.grammar ?? 72,
-        vocabulary: matrix.vocabulary ?? 75,
-        pronunciation: matrix.pronunciation ?? 70,
-        fluency: matrix.fluency ?? 72,
-        confidence: matrix.confidence ?? legacy.confidence_score ?? 75,
-      },
-      progress: {
-        completedSessionsCount: legacy.weekly_statistics?.sessionsCompleted ?? 5,
-        totalMinutesPracticed: legacy.weekly_statistics?.totalMinutesPracticed ?? 120,
-        wordsLearnedCount: legacy.weekly_statistics?.wordsLearnedCount ?? 85,
-        streakDays: 3,
-        completedMinutesThisWeek: (legacy.weekly_statistics?.sessionsCompleted ?? 2) * dailyMinutes,
-        lastSessionDateIso: legacy.last_activity || nowIso,
-      },
-      goals: {
-        weeklyMinutesGoal: weeklyGoalMinutes,
-        milestoneGoals: [
-          'Concluir simulação de negociação com precisão B2',
-          'Alcançar 80% no vocabulário corporativo',
-        ],
-      },
-      learningHistory: [],
       version: 1,
       createdAtIso: legacy.created_at || nowIso,
       updatedAtIso: legacy.updated_at || nowIso,
@@ -103,9 +81,104 @@ export class StudentProfileMapper {
   }
 
   /**
+   * Translates a legacy UserProfile into the canonical DigitalTwinDTO.
+   */
+  public static legacyToTwin(legacy: Partial<UserProfile>): Partial<any> {
+    const matrix = legacy.skill_matrix;
+    const competencies: any = {};
+
+    if (matrix) {
+      Object.assign(competencies, {
+        grammar: matrix.grammar ?? 70,
+        vocabulary: matrix.vocabulary ?? 70,
+        listening: matrix.listening ?? 70,
+        speaking: matrix.speaking ?? 70,
+        reading: matrix.reading ?? 70,
+        writing: matrix.writing ?? 70,
+        pronunciation: matrix.pronunciation ?? 70,
+        fluency: matrix.fluency ?? 70,
+        confidence: matrix.confidence ?? legacy.confidence_score ?? 70,
+      });
+    } else if (typeof legacy.confidence_score === 'number') {
+      competencies.confidence = legacy.confidence_score;
+    }
+
+    return {
+      currentLevel: (legacy.last_assessment?.level || 'B1') as string,
+      competencies: Object.keys(competencies).length > 0 ? competencies : undefined,
+      progress: {
+        completedSessionsCount: legacy.weekly_statistics?.sessionsCompleted ?? 0,
+        totalMinutesPracticed: legacy.weekly_statistics?.totalMinutesPracticed ?? 0,
+        wordsLearnedCount: legacy.weekly_statistics?.wordsLearnedCount ?? 0,
+        streakDays: (legacy as any).streak_days ?? 0,
+        completedMinutesThisWeek: legacy.weekly_statistics?.totalMinutesPracticed ?? 0,
+        lastSessionDateIso: legacy.last_activity || new Date().toISOString(),
+        lastSessionTopic: legacy.current_focus || '',
+      }
+    };
+  }
+
+  /**
+   * Translates a StudentProfileEntity into the Application-layer DTO.
+   */
+  public static mapToDTO(entity: any): StudentProfileData {
+    const data = entity.toData();
+    return {
+      id: data.id,
+      name: data.name || 'Aluno Executivo',
+      email: data.email || `${data.id}@fluento.ai`,
+      nativeLanguage: data.nativeLanguage || 'pt',
+      targetLanguages: data.targetLanguages || ['es'],
+      currentLevel: data.currentLevel || 'B1',
+      targetLevel: data.targetLevel || 'B2',
+      objectives: {
+        primaryMotivation: data.objectives?.primaryMotivation || '',
+        professionalDomain: data.objectives?.professionalDomain || '',
+        currentFocus: data.objectives?.currentFocus || '',
+        targetExamOrMilestone: data.objectives?.targetExamOrMilestone || '',
+      },
+      interests: data.interests || [],
+      preferences: {
+        dailyGoalMinutes: data.preferences.dailyGoalMinutes,
+        weeklyGoalMinutes: data.preferences.weeklyGoalMinutes,
+        preferredTeacherPersona: data.preferences.preferredTeacherPersona || 'Prof. Sofia',
+        correctionStrictness: data.preferences.correctionStrictness || 'balanced',
+        pace: data.preferences.pace || 'moderate',
+        learningStyle: (data.preferences.learningStyle as any) || 'interactive',
+      },
+      version: data.version,
+      createdAtIso: data.createdAtIso,
+      updatedAtIso: data.updatedAtIso,
+      lastSyncedAtIso: data.lastSyncedAtIso,
+    };
+  }
+
+  /**
+   * Translates a DigitalTwinEntity into the Application-layer DTO.
+   */
+  public static mapTwinToDTO(entity: any): any {
+    const data = entity.toData();
+    return {
+      ...data,
+      updatedAtIso: data.updatedAtIso || new Date().toISOString(),
+    };
+  }
+
+  /**
    * Translates canonical StudentProfileData back into legacy UserProfile for backwards compatibility.
    */
-  public static profileToLegacy(profile: StudentProfileData): UserProfile {
+  public static profileToLegacy(profile: StudentProfileData, digitalTwin?: any): UserProfile {
+    const competencies = digitalTwin?.competencies || {
+      speaking: 70, listening: 70, reading: 70, writing: 70, grammar: 70, vocabulary: 70, pronunciation: 70, fluency: 70, confidence: 70
+    };
+    const progress = digitalTwin?.progress || {
+      completedSessionsCount: 0, totalMinutesPracticed: 0, wordsLearnedCount: 0, streakDays: 0, completedMinutesThisWeek: 0, lastSessionDateIso: new Date().toISOString()
+    };
+
+    const legacyPace: 'relaxed' | 'moderate' | 'intensive' = 
+      profile.preferences.pace === 'fast' ? 'intensive' :
+      profile.preferences.pace === 'slow' ? 'relaxed' : 'moderate';
+
     return {
       id: profile.id,
       email: profile.email,
@@ -113,7 +186,7 @@ export class StudentProfileMapper {
       target_languages: [...profile.targetLanguages],
       learning_preferences: {
         topics: [...profile.interests],
-        pace: profile.preferences.pace,
+        pace: legacyPace,
         correction_style: profile.preferences.correctionStrictness,
         feedback_frequency: 'immediate',
       },
@@ -121,31 +194,31 @@ export class StudentProfileMapper {
       humor_style: 'light',
       weekly_goal: Math.max(1, Math.round(profile.preferences.weeklyGoalMinutes / (profile.preferences.dailyGoalMinutes || 15))),
       minutes_per_day: profile.preferences.dailyGoalMinutes,
-      confidence_score: profile.competencies.confidence || 75,
+      confidence_score: competencies.confidence || 75,
       skill_matrix: {
-        grammar: profile.competencies.grammar,
-        vocabulary: profile.competencies.vocabulary,
-        listening: profile.competencies.listening,
-        speaking: profile.competencies.speaking,
-        reading: profile.competencies.reading,
-        writing: profile.competencies.writing,
-        pronunciation: profile.competencies.pronunciation,
-        fluency: profile.competencies.fluency,
-        confidence: profile.competencies.confidence,
+        grammar: competencies.grammar,
+        vocabulary: competencies.vocabulary,
+        listening: competencies.listening,
+        speaking: competencies.speaking,
+        reading: competencies.reading,
+        writing: competencies.writing,
+        pronunciation: competencies.pronunciation,
+        fluency: competencies.fluency,
+        confidence: competencies.confidence,
       },
       current_focus: profile.objectives.currentFocus,
-      learning_style: (profile.preferences.learningStyle as any) || 'interactive',
+      learning_style: profile.preferences.learningStyle || 'interactive',
       motivation: profile.objectives.primaryMotivation,
       difficulty_preference: profile.preferences.correctionStrictness === 'strict' ? 'challenging' : 'balanced',
       preferred_topics: [...profile.interests],
       last_assessment: {
-        date: profile.progress.lastSessionDateIso || new Date().toISOString(),
+        date: progress.lastSessionDateIso || new Date().toISOString(),
         level: profile.currentLevel,
         score: Math.round(
-          (profile.competencies.speaking +
-            profile.competencies.listening +
-            profile.competencies.grammar +
-            profile.competencies.vocabulary) / 4
+          (competencies.speaking +
+            competencies.listening +
+            competencies.grammar +
+            competencies.vocabulary) / 4
         ),
       },
       created_at: profile.createdAtIso,
@@ -153,136 +226,13 @@ export class StudentProfileMapper {
       hobbies: [...profile.interests],
       interests: [...profile.interests],
       profession: profile.objectives.professionalDomain,
-      last_activity: profile.progress.lastSessionDateIso,
+      last_activity: progress.lastSessionDateIso,
       weekly_statistics: {
-        sessionsCompleted: profile.progress.completedSessionsCount,
-        totalMinutesPracticed: profile.progress.totalMinutesPracticed,
-        wordsLearnedCount: profile.progress.wordsLearnedCount,
+        sessionsCompleted: progress.completedSessionsCount,
+        totalMinutesPracticed: progress.totalMinutesPracticed,
+        wordsLearnedCount: progress.wordsLearnedCount,
         grammarRulesMasteredCount: 12,
         averageAccuracyPercent: 85,
-      },
-    };
-  }
-
-  /**
-   * Translates StudentDigitalTwinState to canonical StudentProfileData.
-   */
-  public static twinToProfile(twin: StudentDigitalTwinState): StudentProfileData {
-    return {
-      id: twin.identity.studentId,
-      name: twin.identity.name,
-      email: twin.identity.email,
-      nativeLanguage: twin.identity.nativeLanguage,
-      targetLanguages: [twin.identity.targetLanguage],
-      currentLevel: twin.language.currentCefr,
-      targetLevel: twin.goal.targetCefrGoal,
-      objectives: {
-        primaryMotivation: twin.goal.primaryMotivation,
-        professionalDomain: twin.goal.professionalDomain,
-        currentFocus: twin.recommendation.nextFocusSkills.join(', ') || 'Fluência Conversacional',
-        targetExamOrMilestone: `Nível ${twin.goal.targetCefrGoal}`,
-      },
-      interests: twin.learning.focusAreas,
-      preferences: {
-        dailyGoalMinutes: twin.recommendation.recommendedSessionDurationMinutes,
-        weeklyGoalMinutes: twin.goal.weeklyMinutesGoal,
-        preferredTeacherPersona: 'Prof. Sofia',
-        correctionStrictness: twin.recommendation.suggestedScaffoldingLevel === 'high' ? 'gentle' : 'balanced',
-        pace: twin.learning.preferredPace === 'accelerated' ? 'intensive' : twin.learning.preferredPace === 'slow' ? 'relaxed' : 'moderate',
-        learningStyle: twin.learning.learningStyle,
-      },
-      competencies: {
-        speaking: twin.emotional.confidenceScores.speaking,
-        listening: twin.language.listeningComprehensionScore,
-        reading: 75,
-        writing: 70,
-        grammar: twin.language.grammarMasteryScore,
-        vocabulary: Math.min(100, Math.round((twin.language.estimatedVocabularySize / 3000) * 100)),
-        pronunciation: twin.language.pronunciationScore,
-        fluency: twin.language.fluencyScore,
-        confidence: twin.emotional.confidenceScores.overall,
-      },
-      progress: {
-        completedSessionsCount: twin.behaviour.completedSessionsCount,
-        totalMinutesPracticed: Math.round((twin.behaviour.totalSpeakingTimeSeconds || 0) / 60),
-        wordsLearnedCount: Math.round(twin.language.estimatedVocabularySize * 0.3),
-        streakDays: 3,
-        completedMinutesThisWeek: twin.goal.completedMinutesThisWeek,
-        lastSessionDateIso: twin.lastUpdatedIso,
-      },
-      goals: {
-        weeklyMinutesGoal: twin.goal.weeklyMinutesGoal,
-        targetDeadlineIso: twin.goal.deadlineIso,
-        milestoneGoals: [
-          `Atingir Nível ${twin.goal.targetCefrGoal}`,
-          ...twin.recommendation.nextFocusSkills,
-        ],
-      },
-      learningHistory: twin.memory.ephemeralSessionNotes.map((note, idx) => ({
-        sessionId: `twin_sess_${idx}`,
-        dateIso: twin.lastUpdatedIso,
-        topicTitle: note,
-        cefrLevel: twin.language.currentCefr,
-        accuracyPercent: 85,
-      })),
-      version: twin.revision,
-      createdAtIso: twin.identity.createdAtIso,
-      updatedAtIso: twin.lastUpdatedIso,
-      lastSyncedAtIso: twin.lastUpdatedIso,
-    };
-  }
-
-  /**
-   * Synchronizes changes from StudentProfileData into a StudentDigitalTwinState.
-   */
-  public static profileToTwin(
-    profile: StudentProfileData,
-    existingTwin?: StudentDigitalTwinState
-  ): Partial<StudentDigitalTwinState> {
-    const targetCefr = (profile.targetLevel || 'B2') as CEFRLevel;
-    const currentCefr = (profile.currentLevel || 'B1') as CEFRLevel;
-
-    return {
-      identity: {
-        studentId: profile.id,
-        name: profile.name || existingTwin?.identity.name || 'Aluno Executivo',
-        email: profile.email || existingTwin?.identity.email || `${profile.id}@fluento.ai`,
-        nativeLanguage: profile.nativeLanguage,
-        targetLanguage: profile.targetLanguages[0] || 'es',
-        timezone: existingTwin?.identity.timezone || 'Europe/Lisbon',
-        createdAtIso: existingTwin?.identity.createdAtIso || profile.createdAtIso,
-        lastActiveIso: new Date().toISOString(),
-      },
-      learning: {
-        learningStyle: (profile.preferences.learningStyle as any) || existingTwin?.learning.learningStyle || 'interactive',
-        preferredPace: profile.preferences.pace === 'intensive' ? 'accelerated' : profile.preferences.pace === 'relaxed' ? 'slow' : 'moderate',
-        sessionFrequency: 'daily',
-        focusAreas: ['speaking_fluency', 'business_vocabulary'],
-        cognitiveLoadTolerance: 'medium',
-      },
-      language: {
-        currentCefr,
-        targetCefr,
-        estimatedVocabularySize: existingTwin?.language.estimatedVocabularySize || 1600,
-        grammarMasteryScore: profile.competencies.grammar,
-        pronunciationScore: profile.competencies.pronunciation,
-        listeningComprehensionScore: profile.competencies.listening,
-        fluencyScore: profile.competencies.fluency || profile.competencies.speaking,
-        knownL1InterferencePatterns: existingTwin?.language.knownL1InterferencePatterns || [],
-      },
-      goal: {
-        targetCefrGoal: targetCefr,
-        deadlineIso: profile.goals.targetDeadlineIso,
-        primaryMotivation: profile.objectives.primaryMotivation,
-        professionalDomain: profile.objectives.professionalDomain,
-        weeklyMinutesGoal: profile.goals.weeklyMinutesGoal,
-        completedMinutesThisWeek: profile.progress.completedMinutesThisWeek,
-      },
-      recommendation: {
-        recommendedSessionDurationMinutes: profile.preferences.dailyGoalMinutes,
-        suggestedScaffoldingLevel: profile.preferences.correctionStrictness === 'strict' ? 'minimal' : 'moderate',
-        nextFocusSkills: [profile.objectives.currentFocus],
-        optimalPracticeTimeOfDay: 'morning',
       },
     };
   }

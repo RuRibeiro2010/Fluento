@@ -1,9 +1,11 @@
 import { ApplicationQueryHandlers } from '../queries/query-handlers';
 import { StudentDTO } from '../dto/application.dtos';
 import { IStudentRepository } from '../../domain/student/repositories/student-repository.interface';
-import { StudentProfileData } from '../../domain/student/entities/student-profile.entity';
-import { StudentProfileSyncService, ProfileChangeListener } from '../services/student-profile-sync.service';
+import { StudentProfileData } from '../dto/student-profile.dto';
+import { DigitalTwinDTO } from '../dto/digital-twin.dto';
+import { StudentProfileSyncService, ProfileChangeListener, SynchronizedStudentState } from '../services/student-profile-sync.service';
 import { UserProfile } from '../../../types/profile';
+import { StudentProfileMapper } from '../mappers/student-profile.mapper';
 
 export interface StudentProfileViewModelDTO {
   readonly id: string;
@@ -46,101 +48,42 @@ export class StudentProfileAdapter {
       return this.syncService.getProfile(studentId);
     }
 
-    // Fallback if syncService not provided: query repository or return default
-    try {
-      const studentDto: StudentDTO = await this.queryHandlers.getStudentProfile({ studentId });
-      return {
-        id: studentDto.id,
-        name: 'Aluno Executivo',
-        email: studentDto.email,
-        nativeLanguage: studentDto.nativeLanguage,
-        targetLanguages: studentDto.targetLanguages,
-        currentLevel: studentDto.currentLevel,
-        targetLevel: 'B2',
-        objectives: {
-          primaryMotivation: studentDto.motivation,
-          currentFocus: studentDto.currentFocus,
-        },
-        interests: ['Negócios', 'Viagens'],
-        preferences: {
-          dailyGoalMinutes: studentDto.preferences.dailyGoalMinutes,
-          weeklyGoalMinutes: studentDto.preferences.dailyGoalMinutes * 4,
-          preferredTeacherPersona: studentDto.preferences.preferredTeacherPersona,
-          correctionStrictness: studentDto.preferences.correctionStrictness === 'strict' ? 'strict' : 'balanced',
-          pace: 'moderate',
-        },
-        competencies: {
-          speaking: studentDto.skillMatrix.speaking,
-          listening: studentDto.skillMatrix.listening,
-          reading: studentDto.skillMatrix.reading,
-          writing: studentDto.skillMatrix.writing,
-          grammar: studentDto.skillMatrix.grammar,
-          vocabulary: studentDto.skillMatrix.vocabulary,
-          pronunciation: 70,
-        },
-        progress: {
-          completedSessionsCount: 5,
-          totalMinutesPracticed: 100,
-          wordsLearnedCount: 75,
-          streakDays: 3,
-          completedMinutesThisWeek: 45,
-        },
-        goals: {
-          weeklyMinutesGoal: 60,
-          milestoneGoals: ['Atingir fluência B2'],
-        },
-        learningHistory: [],
-        version: 1,
-        createdAtIso: studentDto.createdAt || new Date().toISOString(),
-        updatedAtIso: studentDto.updatedAt || new Date().toISOString(),
-      };
-    } catch {
-      return {
-        id: studentId,
-        name: 'Aluno Executivo',
-        email: `${studentId}@fluento.ai`,
-        nativeLanguage: 'pt',
-        targetLanguages: ['es'],
-        currentLevel: 'B1',
-        targetLevel: 'B2',
-        objectives: {
-          primaryMotivation: 'Crescimento de carreira internacional',
-          currentFocus: 'Apresentação Executiva & Negociação de Ideias',
-        },
-        interests: ['Negócios', 'Viagens'],
-        preferences: {
-          dailyGoalMinutes: 15,
-          weeklyGoalMinutes: 60,
-          preferredTeacherPersona: 'Prof. Sofia',
-          correctionStrictness: 'balanced',
-          pace: 'moderate',
-        },
-        competencies: {
-          speaking: 72,
-          listening: 78,
-          reading: 80,
-          writing: 70,
-          grammar: 74,
-          vocabulary: 76,
-          pronunciation: 71,
-        },
-        progress: {
-          completedSessionsCount: 5,
-          totalMinutesPracticed: 120,
-          wordsLearnedCount: 85,
-          streakDays: 3,
-          completedMinutesThisWeek: 45,
-        },
-        goals: {
-          weeklyMinutesGoal: 60,
-          milestoneGoals: ['Completar 4 sessões executivas'],
-        },
-        learningHistory: [],
-        version: 1,
-        createdAtIso: new Date().toISOString(),
-        updatedAtIso: new Date().toISOString(),
-      };
+    // Fallback if syncService not provided: return default
+    return {
+      id: studentId,
+      name: 'Aluno Executivo',
+      email: `${studentId}@fluento.ai`,
+      nativeLanguage: 'pt',
+      targetLanguages: ['es'],
+      currentLevel: 'B1',
+      targetLevel: 'B2',
+      objectives: {
+        primaryMotivation: 'Crescimento de carreira internacional',
+        currentFocus: 'Apresentação Executiva & Negociação de Ideias',
+      },
+      interests: ['Negócios', 'Viagens'],
+      preferences: {
+        dailyGoalMinutes: 15,
+        weeklyGoalMinutes: 60,
+        preferredTeacherPersona: 'Prof. Sofia',
+        correctionStrictness: 'balanced',
+        pace: 'moderate',
+        learningStyle: 'interactive',
+      },
+      version: 1,
+      createdAtIso: new Date().toISOString(),
+      updatedAtIso: new Date().toISOString(),
+    } as any;
+  }
+
+  /**
+   * Retrieves the Student Digital Twin DTO.
+   */
+  public async getDigitalTwin(studentId = 'usr_fluento_primary'): Promise<DigitalTwinDTO> {
+    if (this.syncService) {
+      return this.syncService.getDigitalTwin(studentId);
     }
+    throw new Error('SyncService required for Digital Twin');
   }
 
   /**
@@ -149,12 +92,13 @@ export class StudentProfileAdapter {
   public async updateProfile(
     studentId: string,
     updates: Partial<StudentProfileData>
-  ): Promise<StudentProfileData> {
+  ): Promise<SynchronizedStudentState> {
     if (this.syncService) {
       return this.syncService.updateProfile(studentId, updates);
     }
-    const current = await this.getCanonicalProfile(studentId);
-    return { ...current, ...updates, updatedAtIso: new Date().toISOString() };
+    const profile = await this.getCanonicalProfile(studentId);
+    const twin = await this.getDigitalTwin(studentId);
+    return { profile: { ...profile, ...updates }, digitalTwin: twin };
   }
 
   /**
@@ -162,57 +106,26 @@ export class StudentProfileAdapter {
    */
   public async saveOnboardingProfile(
     profile: UserProfile | Partial<StudentProfileData>
-  ): Promise<StudentProfileData> {
+  ): Promise<SynchronizedStudentState> {
     if (this.syncService) {
       if ('native_language' in profile) {
         return this.syncService.syncLegacyProfile(profile as UserProfile);
       }
       return this.syncService.updateProfile(profile.id || 'usr_fluento_primary', profile);
     }
-    return this.getCanonicalProfile(profile.id);
+    throw new Error('SyncService required');
   }
 
   /**
    * Returns a legacy UserProfile representation for backwards-compatible UI components.
    */
   public async getLegacyUserProfile(studentId = 'usr_fluento_primary'): Promise<UserProfile> {
-    const canonical = await this.getCanonicalProfile(studentId);
     if (this.syncService) {
-      return this.syncService.toLegacyUserProfile(canonical);
+      const state = await this.syncService.getSynchronizedState(studentId);
+      return StudentProfileMapper.profileToLegacy(state.profile, state.digitalTwin);
     }
-    return {
-      id: canonical.id,
-      email: canonical.email,
-      native_language: canonical.nativeLanguage,
-      target_languages: canonical.targetLanguages,
-      coach_personality: canonical.preferences.preferredTeacherPersona,
-      humor_style: 'light',
-      weekly_goal: Math.max(1, Math.round(canonical.preferences.weeklyGoalMinutes / (canonical.preferences.dailyGoalMinutes || 15))),
-      minutes_per_day: canonical.preferences.dailyGoalMinutes,
-      confidence_score: canonical.competencies.confidence || 75,
-      skill_matrix: {
-        grammar: canonical.competencies.grammar,
-        vocabulary: canonical.competencies.vocabulary,
-        listening: canonical.competencies.listening,
-        speaking: canonical.competencies.speaking,
-        reading: canonical.competencies.reading,
-        writing: canonical.competencies.writing,
-        pronunciation: canonical.competencies.pronunciation,
-        fluency: canonical.competencies.fluency,
-        confidence: canonical.competencies.confidence,
-      },
-      current_focus: canonical.objectives.currentFocus,
-      learning_style: (canonical.preferences.learningStyle as any) || 'interactive',
-      motivation: canonical.objectives.primaryMotivation,
-      difficulty_preference: canonical.preferences.correctionStrictness === 'strict' ? 'challenging' : 'balanced',
-      preferred_topics: canonical.interests,
-      learning_preferences: {
-        topics: canonical.interests,
-        pace: canonical.preferences.pace,
-        correction_style: canonical.preferences.correctionStrictness,
-        feedback_frequency: 'immediate',
-      },
-    };
+    const profile = await this.getCanonicalProfile(studentId);
+    return StudentProfileMapper.profileToLegacy(profile as any);
   }
 
   /**

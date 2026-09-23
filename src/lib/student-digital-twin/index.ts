@@ -19,5 +19,3 @@ export * from './profile-merger';
 export * from './telemetry';
 export * from './persistence-adapter';
 export * from './student-digital-twin';
-export * from './fixtures';
-export * from './__tests__/student-digital-twin.test';

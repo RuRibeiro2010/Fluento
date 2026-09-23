@@ -1,6 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { Lesson } from '@/types/lesson';
-import { generateLesson } from '@/lib/ai/lesson-generator';
 import { LoadingState } from '@/components/ui/LoadingState';
 import {
   ArrowLeft,
@@ -22,6 +20,8 @@ import {
   MessageSquare,
   ArrowRight,
 } from 'lucide-react';
+import { dashboardAdapter } from '@/src/application/adapters';
+import { DetailedLessonDTO } from '@/src/application/dto/lesson.dtos';
 
 interface LessonPageProps {
   lessonId?: string;
@@ -29,7 +29,7 @@ interface LessonPageProps {
 }
 
 export default function LessonPage({ lessonId = 'sample-1', onBack }: LessonPageProps) {
-  const [lesson, setLesson] = useState<Lesson | null>(null);
+  const [lesson, setLesson] = useState<DetailedLessonDTO | null>(null);
   const [selectedAnswers, setSelectedAnswers] = useState<Record<string, string>>({});
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -39,16 +39,16 @@ export default function LessonPage({ lessonId = 'sample-1', onBack }: LessonPage
   useEffect(() => {
     async function fetchLesson() {
       setLoading(true);
-      const data = await generateLesson(
-        'es',
-        'pt',
-        'Apresentação Executiva & Negociação de Ideias',
-        'B1'
-      );
-      setLesson(data);
-      setLoading(false);
+      try {
+        const studentId = 'usr_fluento_primary';
+        const data = await dashboardAdapter.generateNewLesson(studentId);
+        setLesson(data);
+      } catch (err) {
+        console.error('[LessonPage] Failed to generate lesson via application layer:', err);
+      } finally {
+        setLoading(false);
+      }
     }
-
     fetchLesson();
   }, [lessonId]);
 

@@ -20,14 +20,37 @@ export type MessageType =
   | 'system_status';
 
 export interface ConversationMessage {
-  id: string;
-  sender: MessageSender;
-  text: string;
-  timestampIso: string;
-  type: MessageType;
-  translation?: string;
-  tip?: string;
-  isStreaming?: boolean;
+  readonly id: string;
+  readonly sender: MessageSender;
+  readonly text: string;
+  readonly timestampIso: string;
+  readonly type: MessageType;
+  readonly translation?: string;
+  readonly tip?: string;
+}
+
+/**
+ * Domain-owned data representation of a Conversation Session.
+ */
+export interface ConversationSessionData {
+  sessionId: string;
+  lessonId: string;
+  studentId: string;
+  targetLanguage: string;
+  nativeLanguage: string;
+  cefrLevel: string;
+  teacherPersona: string;
+  topic: string;
+  objective: string;
+  messages: ConversationMessage[];
+  state: ConversationSessionState;
+  startedAtIso: string;
+  updatedAtIso: string;
+  completedAtIso?: string;
+  turnsCount: number;
+  aiConfigured: boolean;
+  errorMessage?: string;
+  overallScore?: number;
 }
 
 export interface ConversationSessionProps {
@@ -44,27 +67,6 @@ export interface ConversationSessionProps {
   startedAt: TimeStamp;
   updatedAt: TimeStamp;
   completedAt?: TimeStamp;
-  turnsCount: number;
-  aiConfigured: boolean;
-  errorMessage?: string;
-  overallScore?: number;
-}
-
-export interface ConversationSessionData {
-  sessionId: string;
-  lessonId: string;
-  studentId: string;
-  targetLanguage: string;
-  nativeLanguage: string;
-  cefrLevel: string;
-  teacherPersona: string;
-  topic: string;
-  objective: string;
-  messages: ConversationMessage[];
-  state: ConversationSessionState;
-  startedAtIso: string;
-  updatedAtIso: string;
-  completedAtIso?: string;
   turnsCount: number;
   aiConfigured: boolean;
   errorMessage?: string;

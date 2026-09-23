@@ -1,6 +1,6 @@
 import { ValueObject } from '../../shared/value-object';
 
-export type PaceType = 'relaxed' | 'moderate' | 'intensive';
+export type PaceType = 'slow' | 'moderate' | 'fast';
 export type FeedbackStyle = 'immediate' | 'end_of_lesson' | 'daily_summary';
 export type CorrectionStyle = 'gentle' | 'strict' | 'adaptive';
 

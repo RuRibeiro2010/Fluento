@@ -20,10 +20,20 @@ import { DashboardAdapter } from './dashboard.adapter';
 import { StudentProfileAdapter } from './student.adapter';
 import { LearningProgressAdapter } from './learning.adapter';
 import { LessonRoomAdapter } from './lesson-room.adapter';
+import { AssessmentAdapter } from './assessment.adapter';
 import { LocalStorageStudentProfileGateway } from './storage/local-storage-student-profile.gateway';
+import { LocalStorageDigitalTwinGateway } from './storage/local-storage-digital-twin.gateway';
 import { LocalStorageConversationSessionGateway } from './storage/local-storage-conversation-session.gateway';
 import { StudentProfileSyncService } from '../services/student-profile-sync.service';
 import { LessonConversationUseCase } from '../use-cases/lesson-conversation.use-cases';
+import { GetCoachMessageUseCase, GetWeeklyReviewUseCase, GetStudyPlanUseCase } from '../use-cases/coach.use-cases';
+import { GenerateAdaptiveLessonUseCase } from '../use-cases/adaptive-lesson.use-cases';
+import { RunAdaptiveAssessmentUseCase } from '../use-cases/assessment.use-cases';
+import { RuntimeCoachAiAdapter } from '../services/runtime-coach-ai.adapter';
+import { RuntimeAssessmentAiAdapter } from '../services/runtime-assessment-ai.adapter';
+import { RuntimeLessonGeneratorAiAdapter } from '../services/runtime-lesson-generator.adapter';
+import { RuntimeConversationAiAdapter } from '../services/runtime-conversation-ai.adapter';
+import { aiRuntime } from '../../lib/ai-runtime/ai-runtime';
 
 import { LessonEntity } from '../../domain/lesson/entities/lesson.entity';
 import { LessonId } from '../../domain/lesson/value-objects/lesson-id.vo';
@@ -54,6 +64,7 @@ export class ApplicationContainer {
   public readonly uuidGen = new FakeUuidGenerator();
 
   public readonly studentProfileGateway = new LocalStorageStudentProfileGateway();
+  public readonly digitalTwinGateway = new LocalStorageDigitalTwinGateway();
   public readonly conversationSessionGateway = new LocalStorageConversationSessionGateway();
   public readonly studentProfileSyncService: StudentProfileSyncService;
 
@@ -62,40 +73,26 @@ export class ApplicationContainer {
   public readonly studentProfileAdapter: StudentProfileAdapter;
   public readonly learningProgressAdapter: LearningProgressAdapter;
   public readonly lessonConversationUseCase: LessonConversationUseCase;
+  public readonly coachUseCase: GetCoachMessageUseCase;
+  public readonly reviewUseCase: GetWeeklyReviewUseCase;
+  public readonly studyPlanUseCase: GetStudyPlanUseCase;
+  public readonly adaptiveLessonUseCase: GenerateAdaptiveLessonUseCase;
+  public readonly assessmentUseCase: RunAdaptiveAssessmentUseCase;
   public readonly lessonRoomAdapter: LessonRoomAdapter;
+  public readonly assessmentAdapter: AssessmentAdapter;
 
   constructor() {
     this.studentProfileSyncService = new StudentProfileSyncService(
       this.studentProfileGateway,
+      this.digitalTwinGateway,
       this.studentRepo,
       this.eventPublisher
     );
-
-    this.lessonConversationUseCase = new LessonConversationUseCase(
-      this.sessionRepo,
-      this.lessonRepo,
-      this.studentRepo,
-      this.studentProfileSyncService,
-      this.eventPublisher,
-      this.logger,
-      this.conversationSessionGateway
-    );
-    this.lessonRoomAdapter = new LessonRoomAdapter(this.lessonConversationUseCase);
 
     this.queryHandlers = new ApplicationQueryHandlers(
       this.studentRepo,
       this.lessonRepo,
       this.sessionRepo,
-      this.studyPlanRepo,
-      this.analyticsRepo,
-      this.subscriptionRepo,
-      this.memoryRepo
-    );
-
-    this.dashboardAdapter = new DashboardAdapter(
-      this.queryHandlers,
-      this.studentRepo,
-      this.lessonRepo,
       this.studyPlanRepo,
       this.analyticsRepo,
       this.subscriptionRepo,
@@ -108,6 +105,45 @@ export class ApplicationContainer {
       this.studentProfileSyncService
     );
     this.learningProgressAdapter = new LearningProgressAdapter(this.queryHandlers);
+
+    const coachAiService = new RuntimeCoachAiAdapter(aiRuntime);
+    const lessonGeneratorAiService = new RuntimeLessonGeneratorAiAdapter(aiRuntime);
+    const assessmentAiService = new RuntimeAssessmentAiAdapter(aiRuntime);
+    const conversationAiService = new RuntimeConversationAiAdapter(aiRuntime);
+
+    this.lessonConversationUseCase = new LessonConversationUseCase(
+      this.sessionRepo,
+      this.lessonRepo,
+      this.studentRepo,
+      this.studentProfileSyncService,
+      this.eventPublisher,
+      this.logger,
+      this.conversationSessionGateway,
+      conversationAiService
+    );
+    this.lessonRoomAdapter = new LessonRoomAdapter(this.lessonConversationUseCase);
+
+    this.coachUseCase = new GetCoachMessageUseCase(this.studentProfileAdapter, coachAiService, this.logger);
+    this.reviewUseCase = new GetWeeklyReviewUseCase(this.studentProfileAdapter, coachAiService, this.logger);
+    this.studyPlanUseCase = new GetStudyPlanUseCase(this.studentProfileAdapter, coachAiService, this.logger);
+    this.adaptiveLessonUseCase = new GenerateAdaptiveLessonUseCase(this.studentProfileAdapter, coachAiService, lessonGeneratorAiService, this.logger);
+    this.assessmentUseCase = new RunAdaptiveAssessmentUseCase(assessmentAiService, this.logger);
+    this.assessmentAdapter = new AssessmentAdapter(this.assessmentUseCase);
+
+    this.dashboardAdapter = new DashboardAdapter(
+      this.queryHandlers,
+      this.studentRepo,
+      this.lessonRepo,
+      this.studyPlanRepo,
+      this.analyticsRepo,
+      this.subscriptionRepo,
+      this.memoryRepo,
+      this.studentProfileAdapter,
+      coachAiService,
+      this.coachUseCase,
+      this.reviewUseCase,
+      this.adaptiveLessonUseCase
+    );
 
     this.seedDefaultCatalog();
   }
@@ -178,6 +214,8 @@ export const learningProgressAdapter = applicationContainer.learningProgressAdap
 export const applicationQueryHandlers = applicationContainer.queryHandlers;
 export const studentProfileSyncService = applicationContainer.studentProfileSyncService;
 export const studentProfileGateway = applicationContainer.studentProfileGateway;
+export const digitalTwinStorageGateway = applicationContainer.digitalTwinGateway;
 export const conversationSessionGateway = applicationContainer.conversationSessionGateway;
 export const lessonConversationUseCase = applicationContainer.lessonConversationUseCase;
 export const lessonRoomAdapter = applicationContainer.lessonRoomAdapter;
+export const assessmentAdapter = applicationContainer.assessmentAdapter;

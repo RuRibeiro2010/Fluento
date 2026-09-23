@@ -17,5 +17,3 @@ export * from './roi-analyzer';
 export * from './analytics-report';
 export * from './telemetry';
 export * from './learning-analytics';
-export * from './fixtures';
-export * from './__tests__/learning-analytics.test';

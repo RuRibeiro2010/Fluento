@@ -7,8 +7,8 @@ import {
 import {
   ConversationSessionDTO,
   LessonSessionSummaryDTO,
+  ConversationMessageDTO,
 } from '../dto/conversation.dtos';
-import { ConversationMessage } from '../../domain/session/entities/conversation-session.entity';
 
 export interface AiHealthCheckResult {
   configured: boolean;
@@ -53,7 +53,7 @@ export class LessonRoomAdapter {
     onStreamChunk?: (delta: string) => void
   ): Promise<{
     session: ConversationSessionDTO;
-    teacherMessage?: ConversationMessage;
+    teacherMessage?: ConversationMessageDTO;
   }> {
     return this.conversationUseCase.sendStudentMessage({
       sessionId,

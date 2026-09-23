@@ -6,5 +6,7 @@ export * from './events/lesson-created.event';
 export * from './errors/lesson.errors';
 export * from './rules/lesson.rules';
 export * from './services/lesson-adaptation.service';
+export * from './services/lesson-rules.service';
+export * from './types';
 export * from './repositories/lesson-repository.interface';
 export * from './factories/lesson.factory';

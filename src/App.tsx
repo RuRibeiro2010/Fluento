@@ -89,9 +89,9 @@ export default function App() {
     });
 
     // Subscribe to profile updates across the app
-    const unsubscribe = studentProfileAdapter.subscribe((canonical) => {
+    const unsubscribe = studentProfileAdapter.subscribe((state) => {
       if (isMounted) {
-        studentProfileAdapter.getLegacyUserProfile(canonical.id).then((updated) => {
+        studentProfileAdapter.getLegacyUserProfile(state.profile.id).then((updated) => {
           if (isMounted && updated) {
             setUserProfile(updated);
           }

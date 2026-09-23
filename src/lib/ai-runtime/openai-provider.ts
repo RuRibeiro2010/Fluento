@@ -6,6 +6,7 @@
 
 import { AIProvider } from './provider-interface';
 import { ModelRequest, ModelResponse, StreamChunk, SupportedProvider } from './types';
+import { estimateCost } from './pricing';
 
 export class OpenAIProvider implements AIProvider {
   public readonly providerName: SupportedProvider = 'openai';
@@ -27,6 +28,7 @@ export class OpenAIProvider implements AIProvider {
       try {
         const response = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
+          signal: request.signal,
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${apiKey}`
@@ -59,8 +61,7 @@ export class OpenAIProvider implements AIProvider {
     const promptTokens = Math.ceil((request.prompt.length + (request.systemInstruction?.length || 0)) / 3.8);
     const completionTokens = Math.ceil(textContent.length / 3.8);
     const totalTokens = promptTokens + completionTokens;
-    // ~$0.00015 per 1k prompt, $0.0006 per 1k completion for gpt-4o-mini
-    const estimatedCostUsd = (promptTokens / 1000) * 0.00015 + (completionTokens / 1000) * 0.0006;
+    const estimatedCostUsd = estimateCost(model, promptTokens, completionTokens);
 
     return {
       requestId: reqId,
@@ -91,6 +92,9 @@ export class OpenAIProvider implements AIProvider {
     const words = res.content.split(' ');
     
     for (const word of words) {
+      if (request.signal?.aborted) {
+        break;
+      }
       onChunk({
         requestId: reqId,
         delta: word + ' ',

@@ -2,6 +2,7 @@ import React from 'react';
 import { UserProfile } from '@/types/profile';
 import { Flame, Target, Sparkles } from 'lucide-react';
 import { getLanguageByCode } from '@/lib/language/languages';
+import { Card, Heading1, CaptionText, Badge } from '@/src/components/design-system';
 
 interface DashboardHeaderProps {
   profile: Partial<UserProfile>;
@@ -13,21 +14,27 @@ export function DashboardHeader({ profile, streakCount = 3 }: DashboardHeaderPro
   const targetLangs = (profile.target_languages || ['es']).map((c) => getLanguageByCode(c));
 
   return (
-    <div className="rounded-2xl bg-gradient-to-r from-indigo-900 via-indigo-800 to-slate-900 p-6 text-white shadow-xl">
+    <Card variant="accent" className="p-6 border-none">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="space-y-2">
-          <div className="flex items-center gap-2 text-indigo-200 text-xs font-semibold tracking-wider uppercase">
-            <Sparkles className="w-4 h-4 text-amber-400" />
-            AI Language Coach Active
+          <div className="flex items-center gap-2">
+            <Badge variant="indigo" dot>
+              <Sparkles className="w-3 h-3 text-amber-400 mr-1" />
+              AI Language Coach Active
+            </Badge>
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold">
+          <Heading1>
             Welcome back, {profile.email ? profile.email.split('@')[0] : 'Learner'}!
-          </h1>
-          <p className="text-sm text-indigo-100 flex items-center gap-2">
-            <span>Learning: {targetLangs.map((t) => `${t.flag || ''} ${t.name}`).join(', ')}</span>
-            <span className="opacity-50">•</span>
-            <span>Native: {nativeLang.flag} {nativeLang.name}</span>
-          </p>
+          </Heading1>
+          <div className="flex items-center gap-2">
+            <CaptionText className="text-indigo-100 font-medium">
+              Learning: {targetLangs.map((t) => `${t.flag || ''} ${t.name}`).join(', ')}
+            </CaptionText>
+            <span className="opacity-50 text-indigo-100">•</span>
+            <CaptionText className="text-indigo-100 font-medium">
+              Native: {nativeLang.flag} {nativeLang.name}
+            </CaptionText>
+          </div>
         </div>
 
         <div className="flex items-center gap-4">
@@ -36,7 +43,7 @@ export function DashboardHeader({ profile, streakCount = 3 }: DashboardHeaderPro
               <Flame className="w-6 h-6 fill-amber-400" />
             </div>
             <div>
-              <div className="text-xs text-indigo-200 font-medium">Daily Streak</div>
+              <CaptionText className="text-indigo-200 uppercase tracking-wider block">Daily Streak</CaptionText>
               <div className="text-lg font-bold">{streakCount} Days</div>
             </div>
           </div>
@@ -46,12 +53,12 @@ export function DashboardHeader({ profile, streakCount = 3 }: DashboardHeaderPro
               <Target className="w-6 h-6" />
             </div>
             <div>
-              <div className="text-xs text-indigo-200 font-medium">Daily Goal</div>
+              <CaptionText className="text-indigo-200 uppercase tracking-wider block">Daily Goal</CaptionText>
               <div className="text-lg font-bold">{profile.minutes_per_day || 15} min</div>
             </div>
           </div>
         </div>
       </div>
-    </div>
+    </Card>
   );
 }

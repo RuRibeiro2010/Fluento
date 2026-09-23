@@ -17,5 +17,3 @@ export * from './planner-validator';
 export * from './session-planner';
 export * from './telemetry';
 export * from './adaptive-planner';
-export * from './fixtures';
-export * from './__tests__/adaptive-planner.test';

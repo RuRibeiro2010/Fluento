@@ -17,5 +17,3 @@ export * from './teacher-response-style';
 export * from './teacher-guardrails';
 export * from './teacher-validator';
 export * from './teacher-runtime';
-export * from './fixtures';
-export * from './__tests__/teacher-runtime.test';

@@ -1,0 +1,17 @@
+# Fluento - AI Language Learning
+
+Fluento is a personalized AI language teacher that leverages "Student Digital Twin" technology and Learning Analytics to master new languages through immersion.
+
+## Core Features
+- **AI Coach**: Personalized pedagogical guidance based on your learning profile.
+- **Student Digital Twin**: A virtual model of your learning progress, strengths, and weaknesses.
+- **Real-world Missions**: Immersive scenarios to practice speaking in natural contexts.
+- **Learning Analytics**: Deep insights into your fluency, vocabulary retention, and grammar mastery.
+- **Adaptive Planning**: Lessons that evolve with your progress and confidence levels.
+
+## Important Pages
+- [Home](https://fluento.ai/): Product overview and features.
+- [Pricing](https://fluento.ai/pricing): Subscription plans and free trial information.
+
+## Technology Stack
+Fluento is built with a DDD (Domain-Driven Design) architecture, utilizing React for the frontend and a secure Express backend for AI orchestrations.

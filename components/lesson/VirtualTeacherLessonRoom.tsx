@@ -18,11 +18,9 @@ import { lessonRoomAdapter } from '@/src/application/adapters';
 import {
   ConversationSessionDTO,
   LessonSessionSummaryDTO,
+  ConversationMessageDTO,
+  ConversationSessionStateDTO,
 } from '@/src/application/dto/conversation.dtos';
-import {
-  ConversationMessage,
-  ConversationSessionState,
-} from '@/src/domain/session/entities/conversation-session.entity';
 
 interface VirtualTeacherLessonRoomProps {
   lessonId?: string;
@@ -39,10 +37,11 @@ export const VirtualTeacherLessonRoom: React.FC<VirtualTeacherLessonRoomProps> =
   const [isRecording, setIsRecording] = useState(false);
   const [turnCount, setTurnCount] = useState(0);
   const [studentInput, setStudentInput] = useState('');
-  const [sessionState, setSessionState] = useState<ConversationSessionState>('idle');
+  const [sessionState, setSessionState] = useState<ConversationSessionStateDTO>('idle');
   const [currentSession, setCurrentSession] = useState<ConversationSessionDTO | null>(null);
-  const [messages, setMessages] = useState<ConversationMessage[]>([]);
+  const [messages, setMessages] = useState<ConversationMessageDTO[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [streamingMessage, setStreamingMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [summary, setSummary] = useState<LessonSessionSummaryDTO | null>(null);
   const [isRetryingHealth, setIsRetryingHealth] = useState(false);
@@ -52,7 +51,7 @@ export const VirtualTeacherLessonRoom: React.FC<VirtualTeacherLessonRoomProps> =
   // Auto-scroll messages to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isSubmitting]);
+  }, [messages, isSubmitting, streamingMessage]);
 
   // Session Timer
   useEffect(() => {
@@ -106,10 +105,11 @@ export const VirtualTeacherLessonRoom: React.FC<VirtualTeacherLessonRoomProps> =
     const userInput = studentInput.trim();
     setStudentInput('');
     setIsSubmitting(true);
+    setStreamingMessage('');
     setErrorMessage(null);
 
     // Optimistic student message preview
-    const tempStudentMsg: ConversationMessage = {
+    const tempStudentMsg: ConversationMessageDTO = {
       id: `std_temp_${Date.now()}`,
       sender: 'student',
       text: userInput,
@@ -122,7 +122,10 @@ export const VirtualTeacherLessonRoom: React.FC<VirtualTeacherLessonRoomProps> =
     try {
       const result = await lessonRoomAdapter.sendStudentMessage(
         currentSession.sessionId,
-        userInput
+        userInput,
+        (delta) => {
+          setStreamingMessage((prev) => (prev !== null ? prev + delta : delta));
+        }
       );
 
       setCurrentSession(result.session);
@@ -133,6 +136,7 @@ export const VirtualTeacherLessonRoom: React.FC<VirtualTeacherLessonRoomProps> =
       setErrorMessage(err?.message || 'Falha ao processar resposta com o motor de IA.');
     } finally {
       setIsSubmitting(false);
+      setStreamingMessage(null);
     }
   };
 
@@ -415,7 +419,22 @@ export const VirtualTeacherLessonRoom: React.FC<VirtualTeacherLessonRoomProps> =
                 </div>
               ))}
 
-              {isSubmitting && (
+              {streamingMessage !== null && (
+                <div className="flex flex-col items-start">
+                  <div className="max-w-xl p-4 rounded-2xl text-xs sm:text-sm font-medium leading-relaxed bg-indigo-950/80 border border-indigo-800/80 text-indigo-100 rounded-tl-none">
+                    <div className="flex items-center justify-between gap-2 mb-1 opacity-75 text-[10px] uppercase font-bold">
+                      <span>{currentSession?.teacherPersona || 'Professor'}</span>
+                      <Volume2 className="w-3.5 h-3.5 opacity-50" />
+                    </div>
+                    <p className="whitespace-pre-wrap">
+                      {streamingMessage}
+                      <span className="inline-block w-1 h-4 bg-indigo-400 ml-1 animate-pulse" />
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {isSubmitting && streamingMessage === '' && (
                 <div className="flex items-center gap-2 text-xs text-indigo-300 italic p-2">
                   <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" />
                   <span>O Professor está a formular a intervenção...</span>

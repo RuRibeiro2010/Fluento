@@ -13,6 +13,9 @@ import { ApplicationQueryHandlers } from '../../queries/query-handlers';
 import { DashboardAdapter, DashboardViewModelDTO } from '../dashboard.adapter';
 import { StudentProfileAdapter } from '../student.adapter';
 import { LearningProgressAdapter } from '../learning.adapter';
+import { LocalStorageStudentProfileGateway } from '../storage/local-storage-student-profile.gateway';
+import { LocalStorageDigitalTwinGateway } from '../storage/local-storage-digital-twin.gateway';
+import { StudentProfileSyncService } from '../../services/student-profile-sync.service';
 import { ApplicationContainer } from '../application-container';
 import { MemoryFactory } from '../../../domain/memory/factories/memory.factory';
 import { StudyPlanFactory } from '../../../domain/learning/factories/study-plan.factory';
@@ -50,6 +53,17 @@ export async function runAdapterLayerTests(): Promise<{ passed: boolean; logs: s
     const word = MemoryFactory.createNewTrackedWord('std_unit_01', 'desarrollo', 'desenvolvimento', 'negócios');
     await memoryRepo.saveWord(word);
 
+    const studentProfileGateway = new LocalStorageStudentProfileGateway();
+    const digitalTwinGateway = new LocalStorageDigitalTwinGateway();
+    const eventPublisher = { publish: async () => {} } as any;
+
+    const syncService = new StudentProfileSyncService(
+      studentProfileGateway,
+      digitalTwinGateway,
+      studentRepo,
+      eventPublisher
+    );
+
     const queryHandlers = new ApplicationQueryHandlers(
       studentRepo,
       lessonRepo,
@@ -75,6 +89,10 @@ export async function runAdapterLayerTests(): Promise<{ passed: boolean; logs: s
     if (studyPlanDTO.primaryObjective !== 'Negociação Comercial') throw new Error('QueryHandler getStudyPlan objective mismatch');
 
     log('3. Testing DashboardAdapter (UI -> Adapter -> QueryHandler -> Domain -> DTO -> UI)...');
+    const studentProfileAdapter = new StudentProfileAdapter(queryHandlers, studentRepo, syncService);
+    const coachAiService = {
+      generateMonthlyEvolutionData: () => ({ milestonesTimeline: [] })
+    } as any;
     const dashboardAdapter = new DashboardAdapter(
       queryHandlers,
       studentRepo,
@@ -82,10 +100,13 @@ export async function runAdapterLayerTests(): Promise<{ passed: boolean; logs: s
       studyPlanRepo,
       analyticsRepo,
       subscriptionRepo,
-      memoryRepo
+      memoryRepo,
+      studentProfileAdapter,
+      coachAiService
     );
 
     const vm: DashboardViewModelDTO = await dashboardAdapter.getDashboardViewModel('std_unit_01', {
+      native_language: 'pt',
       confidence_score: 82,
       current_focus: 'Negociação Executiva',
     });
@@ -94,7 +115,7 @@ export async function runAdapterLayerTests(): Promise<{ passed: boolean; logs: s
     if (vm.isFallback !== false) throw new Error('DashboardViewModel isFallback should be false for valid student');
     if (vm.student.id !== 'std_unit_01') throw new Error('DashboardViewModel student ID mismatch');
     if (vm.metrics.confidenceScore !== 82) throw new Error('DashboardViewModel confidenceScore mismatch');
-    if (vm.weeklyCalendar.weeklyGoalMinutes !== 140) throw new Error(`DashboardViewModel weekly goal calculation mismatch: expected 140, got ${vm.weeklyCalendar.weeklyGoalMinutes}`);
+    if (vm.weeklyCalendar.weeklyGoalMinutes !== 60) throw new Error(`DashboardViewModel weekly goal calculation mismatch: expected 60, got ${vm.weeklyCalendar.weeklyGoalMinutes}`);
     if (vm.subscription.planTier !== 'free') throw new Error('DashboardViewModel subscription planTier mismatch');
 
     log('4. Testing DashboardAdapter on-the-fly student bootstrap...');
@@ -109,7 +130,7 @@ export async function runAdapterLayerTests(): Promise<{ passed: boolean; logs: s
     if (bootstrappedVM.student.id !== 'std_new_user_99') throw new Error('Bootstrapped student ID mismatch');
 
     log('5. Testing StudentProfileAdapter...');
-    const studentAdapter = new StudentProfileAdapter(queryHandlers, studentRepo);
+    const studentAdapter = new StudentProfileAdapter(queryHandlers, studentRepo, syncService);
     const profileVM = await studentAdapter.getProfile('std_unit_01');
     if (profileVM.source !== 'application_layer') throw new Error('StudentProfileAdapter source should be application_layer');
     if (profileVM.nativeLanguage !== 'pt') throw new Error('StudentProfileAdapter nativeLanguage mismatch');

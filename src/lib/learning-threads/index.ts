@@ -17,5 +17,3 @@ export * from './thread-search';
 export * from './telemetry';
 export * from './thread-manager';
 export * from './learning-threads';
-export * from './fixtures';
-export * from './__tests__/learning-threads.test';

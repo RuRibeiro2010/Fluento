@@ -1,0 +1,12 @@
+User-agent: *
+Allow: /
+Disallow: /dashboard
+Disallow: /lesson
+Disallow: /profile
+Disallow: /settings
+Disallow: /analytics
+Disallow: /onboarding
+Disallow: /placement
+Disallow: /api/
+
+Sitemap: https://fluento.ai/sitemap.xml

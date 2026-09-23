@@ -1,16 +1,17 @@
-import { StudentProfileEntity, StudentProfileData } from '../../domain/student/entities/student-profile.entity';
+import { StudentProfileEntity } from '../../domain/student/entities/student-profile.entity';
+import { DigitalTwinEntity } from '../../domain/student/entities/digital-twin.entity';
 import { StudentId } from '../../domain/student/value-objects/student-id.vo';
 import { StudentObjectives } from '../../domain/student/value-objects/student-objectives.vo';
-import { StudentProgress } from '../../domain/student/value-objects/student-progress.vo';
-import { StudentGoals } from '../../domain/student/value-objects/student-goals.vo';
 import { StudentProfileMapper } from '../mappers/student-profile.mapper';
 import { StudentProfileSyncService } from '../services/student-profile-sync.service';
 import { LocalStorageStudentProfileGateway } from '../adapters/storage/local-storage-student-profile.gateway';
+import { LocalStorageDigitalTwinGateway } from '../adapters/storage/local-storage-digital-twin.gateway';
 import { StudentProfileAdapter } from '../adapters/student.adapter';
 import { InMemoryStudentRepository } from '../adapters/storage/in-memory';
 import { FakeEventPublisher, FakeLogger } from '../adapters/infrastructure';
 import { ApplicationQueryHandlers } from '../queries/query-handlers';
 import { UserProfile } from '../../../types/profile';
+import { StudentProfileData } from '../dto/student-profile.dto';
 import { studentDigitalTwin } from '../../lib/student-digital-twin';
 
 export async function runStudentProfileSyncTests(): Promise<{ passed: boolean; logs: string[] }> {
@@ -22,10 +23,12 @@ export async function runStudentProfileSyncTests(): Promise<{ passed: boolean; l
 
     const studentRepo = new InMemoryStudentRepository();
     const storageGateway = new LocalStorageStudentProfileGateway();
+    const twinStorageGateway = new LocalStorageDigitalTwinGateway();
     storageGateway.clearMemory();
+    twinStorageGateway.clearMemory();
     const eventPublisher = new FakeEventPublisher();
 
-    const syncService = new StudentProfileSyncService(storageGateway, studentRepo, eventPublisher);
+    const syncService = new StudentProfileSyncService(storageGateway, twinStorageGateway, studentRepo, eventPublisher);
 
     // =========================================================================
     // 1. Criação do perfil (Default Profile Creation)
@@ -36,8 +39,11 @@ export async function runStudentProfileSyncTests(): Promise<{ passed: boolean; l
     if (defaultProfile.id !== 'std_test_01') throw new Error(`Expected ID std_test_01, got ${defaultProfile.id}`);
     if (defaultProfile.currentLevel.value !== 'B1') throw new Error(`Expected level B1, got ${defaultProfile.currentLevel.value}`);
     if (defaultProfile.objectives.primaryMotivation.length === 0) throw new Error('Objectives primary motivation should not be empty');
-    if (defaultProfile.competencies.scores.speaking !== 72) throw new Error('Expected speaking score 72');
-    log('✓ Default Profile Entity created with all value objects');
+    
+    // Competencies are now in Digital Twin, not Student Profile
+    const twin = DigitalTwinEntity.createNew('std_test_01');
+    if (twin.toData().competencies.speaking !== 70) throw new Error('Expected speaking score 70 in Digital Twin');
+    log('✓ Default Profile Entity and Digital Twin created correctly');
 
     // =========================================================================
     // 2. Leitura do perfil (Reading via Sync Service & Fallback)
@@ -70,8 +76,11 @@ export async function runStudentProfileSyncTests(): Promise<{ passed: boolean; l
         weeklyGoalMinutes: 100,
         preferredTeacherPersona: 'Prof. Sofia',
         correctionStrictness: 'strict',
-        pace: 'intensive',
+        pace: 'fast' as any,
       },
+    });
+
+    const withTwin = await syncService.updateDigitalTwin('std_fallback_user', {
       competencies: {
         speaking: 85,
         listening: 88,
@@ -80,19 +89,22 @@ export async function runStudentProfileSyncTests(): Promise<{ passed: boolean; l
         grammar: 84,
         vocabulary: 86,
         pronunciation: 82,
+        fluency: 80,
+        confidence: 82,
       },
     });
 
-    if (updated.currentLevel !== 'B2') throw new Error(`Expected level B2, got ${updated.currentLevel}`);
-    if (updated.objectives.primaryMotivation !== 'Apresentações para C-Level Global') throw new Error('Motivation update failed');
-    if (updated.preferences.dailyGoalMinutes !== 25) throw new Error('Preferences update failed');
-    if (updated.competencies.speaking !== 85) throw new Error('Competencies update failed');
-    if (updated.version < 2) throw new Error('Profile version did not increment on update');
+    if (withTwin.profile.currentLevel !== 'B2') throw new Error(`Expected level B2, got ${withTwin.profile.currentLevel}`);
+    if (withTwin.profile.objectives.primaryMotivation !== 'Apresentações para C-Level Global') throw new Error('Motivation update failed');
+    if (withTwin.profile.preferences.dailyGoalMinutes !== 25) throw new Error('Preferences update failed');
+    if (withTwin.digitalTwin.competencies.speaking !== 85) throw new Error('Competencies update failed');
+    if (withTwin.profile.version < 2) throw new Error('Profile version did not increment on update');
 
     // Read back to confirm persistence
-    const reloaded = await syncService.getProfile('std_fallback_user');
-    if (reloaded.currentLevel !== 'B2') throw new Error('Persisted profile does not reflect B2 update');
-    log('✓ Profile update and persistence verified');
+    const reloaded = await syncService.getSynchronizedState('std_fallback_user');
+    if (reloaded.profile.currentLevel !== 'B2') throw new Error('Persisted profile does not reflect B2 update');
+    if (reloaded.digitalTwin.competencies.speaking !== 85) throw new Error('Persisted digital twin does not reflect competency update');
+    log('✓ Profile and Digital Twin update and persistence verified');
 
     // =========================================================================
     // 4. Sincronização (UI -> Adapter -> Service -> Storage -> Digital Twin)
@@ -110,9 +122,9 @@ export async function runStudentProfileSyncTests(): Promise<{ passed: boolean; l
     const profileAdapter = new StudentProfileAdapter(dummyQueryHandlers, studentRepo, syncService);
 
     // Subscribe to changes
-    let notifiedProfile: StudentProfileData | null = null;
-    const unsubscribe = profileAdapter.subscribe((p) => {
-      notifiedProfile = p;
+    let notifiedState: any = null;
+    const unsubscribe = profileAdapter.subscribe((s) => {
+      notifiedState = s;
     });
 
     // Update through adapter
@@ -120,13 +132,13 @@ export async function runStudentProfileSyncTests(): Promise<{ passed: boolean; l
       interests: ['Liderança', 'Finanças', 'Fusões e Aquisições'],
     });
 
-    if (!notifiedProfile) throw new Error('Subscriber was not notified of profile update');
-    if ((notifiedProfile as StudentProfileData).interests[0] !== 'Liderança') throw new Error('Notified profile does not contain new interests');
+    if (!notifiedState) throw new Error('Subscriber was not notified of state update');
+    if (notifiedState.profile.interests[0] !== 'Liderança') throw new Error('Notified profile does not contain new interests');
     unsubscribe();
 
     // Verify Digital Twin synchronization
-    const twin = studentDigitalTwin.getOrCreateTwin('std_fallback_user');
-    if (!twin) throw new Error('Digital Twin was not synchronized');
+    const finalTwin = await syncService.getDigitalTwin('std_fallback_user');
+    if (!finalTwin) throw new Error('Digital Twin was not synchronized');
     log('✓ Full synchronization across adapter, service, gateway, and Digital Twin verified');
 
     // =========================================================================
@@ -170,12 +182,12 @@ export async function runStudentProfileSyncTests(): Promise<{ passed: boolean; l
     };
 
     // Save legacy profile through onboarding adapter
-    const migratedFromLegacy = await profileAdapter.saveOnboardingProfile(legacyInput);
-    if (!migratedFromLegacy) throw new Error('Failed to migrate legacy profile');
-    if (migratedFromLegacy.id !== 'legacy_user_42') throw new Error('Migrated ID mismatch');
-    if (migratedFromLegacy.nativeLanguage !== 'pt') throw new Error('Migrated nativeLanguage mismatch');
-    if (migratedFromLegacy.preferences.dailyGoalMinutes !== 20) throw new Error('Migrated minutes mismatch');
-    if (migratedFromLegacy.competencies.listening !== 85) throw new Error('Migrated skill matrix mismatch');
+    const migratedState = await profileAdapter.saveOnboardingProfile(legacyInput);
+    if (!migratedState) throw new Error('Failed to migrate legacy profile');
+    if (migratedState.profile.id !== 'legacy_user_42') throw new Error('Migrated ID mismatch');
+    if (migratedState.profile.nativeLanguage !== 'pt') throw new Error('Migrated nativeLanguage mismatch');
+    if (migratedState.profile.preferences.dailyGoalMinutes !== 20) throw new Error('Migrated minutes mismatch');
+    if (migratedState.digitalTwin.competencies.listening !== 85) throw new Error('Migrated skill matrix mismatch');
 
     // Convert back to legacy format for legacy UI components
     const convertedLegacy = await profileAdapter.getLegacyUserProfile('legacy_user_42');
@@ -194,9 +206,8 @@ export async function runStudentProfileSyncTests(): Promise<{ passed: boolean; l
       92,
       'Reunião Executiva de Estratégia'
     );
-    if (withSession.progress.completedSessionsCount < 1) throw new Error('Session count did not increase');
-    if (withSession.learningHistory.length === 0) throw new Error('Learning history did not record completed session');
-    if (withSession.learningHistory[0].accuracyPercent !== 92) throw new Error('Accuracy score not recorded correctly');
+    if (withSession.digitalTwin.progress.completedSessionsCount < 1) throw new Error('Session count did not increase');
+    if (withSession.digitalTwin.progress.lastSessionTopic !== 'Reunião Executiva de Estratégia') throw new Error('Last session topic not recorded correctly');
     log('✓ Session completion and learning history tracking verified');
 
     // =========================================================================

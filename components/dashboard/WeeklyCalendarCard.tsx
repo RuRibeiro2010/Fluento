@@ -1,5 +1,6 @@
 import React from 'react';
-import { Calendar as CalendarIcon, CheckCircle2, Clock, ChevronRight } from 'lucide-react';
+import { Calendar as CalendarIcon, CheckCircle2, Clock } from 'lucide-react';
+import { Card, Heading3, CaptionText } from '@/src/components/design-system';
 
 export interface DaySchedule {
   dayName: string;
@@ -32,27 +33,32 @@ export function WeeklyCalendarCard({
   const percentComplete = Math.min(100, Math.round((completedMinutes / weeklyGoalMinutes) * 100));
 
   return (
-    <div className="rounded-2xl bg-slate-900 border border-slate-800 p-6 space-y-6">
+    <Card className="p-6 space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
         <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-indigo-950 text-indigo-400 border border-indigo-800">
+          <div className="p-2.5 rounded-xl bg-indigo-950/50 text-indigo-400 border border-indigo-900/30">
             <CalendarIcon className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="font-bold text-white text-base">Plano Semanal & Calendário</h3>
-            <p className="text-xs text-slate-400">Distribuição recomendada para retenção máxima de fluência</p>
+            <Heading3 className="text-base font-bold">Plano Semanal & Calendário</Heading3>
+            <CaptionText className="text-slate-400">Distribuição recomendada para retenção máxima</CaptionText>
           </div>
         </div>
 
-        <div className="flex items-center gap-4 text-xs font-semibold">
+        <div className="flex items-center gap-4">
           <div className="text-right">
-            <span className="text-slate-400 block text-[10px] uppercase">Progresso Semanal</span>
-            <span className="text-indigo-300 font-bold">
+            <CaptionText className="text-slate-400 uppercase tracking-widest font-bold block text-[10px]">
+              Progresso Semanal
+            </CaptionText>
+            <span className="text-indigo-300 font-black text-xs">
               {completedMinutes} / {weeklyGoalMinutes} min ({percentComplete}%)
             </span>
           </div>
-          <div className="w-24 bg-slate-800 rounded-full h-2.5 overflow-hidden">
-            <div className="bg-indigo-500 h-2.5 rounded-full" style={{ width: `${percentComplete}%` }} />
+          <div className="w-24 bg-slate-800 rounded-full h-2.5 overflow-hidden shadow-inner">
+            <div 
+              className="bg-indigo-500 h-2.5 rounded-full transition-all duration-700 shadow-[0_0_10px_rgba(99,102,241,0.4)]" 
+              style={{ width: `${percentComplete}%` }} 
+            />
           </div>
         </div>
       </div>
@@ -60,40 +66,40 @@ export function WeeklyCalendarCard({
       {/* Grid of 7 days */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
         {days.map((day, idx) => (
-          <div
+          <Card
             key={idx}
-            className={`p-3.5 rounded-xl border transition flex flex-col justify-between space-y-2 ${
-              day.isToday
-                ? 'bg-indigo-950/60 border-indigo-500 text-white shadow-lg shadow-indigo-600/20'
-                : day.isCompleted
-                ? 'bg-slate-950/80 border-slate-800/80 text-slate-300'
-                : 'bg-slate-950/30 border-slate-800/40 text-slate-500'
-            }`}
+            variant={day.isToday ? 'accent' : day.isCompleted ? 'default' : 'outlined'}
+            className={`p-3.5 space-y-2 flex flex-col justify-between transition-all duration-300 ${
+              !day.isToday && !day.isCompleted ? 'opacity-40 grayscale-[0.5]' : ''
+            } ${day.isToday ? 'ring-1 ring-indigo-500/50 scale-[1.02]' : ''}`}
           >
-            <div className="flex items-center justify-between text-xs">
-              <span className={`font-bold ${day.isToday ? 'text-indigo-300' : 'text-slate-400'}`}>
+            <div className="flex items-center justify-between">
+              <span className={`text-xs font-black uppercase tracking-tighter ${day.isToday ? 'text-white' : 'text-slate-400'}`}>
                 {day.dayName}
               </span>
-              <span className="text-[10px] opacity-70">{day.dateStr}</span>
+              <CaptionText className="text-[10px] opacity-60 font-medium">{day.dateStr}</CaptionText>
             </div>
 
-            <div className="space-y-1">
-              <div className="text-xs font-semibold line-clamp-1">{day.topic}</div>
-              <div className="flex items-center gap-1 text-[10px]">
+            <div className="space-y-1.5">
+              <div className={`text-[11px] font-bold leading-tight line-clamp-2 ${day.isToday ? 'text-white' : 'text-slate-200'}`}>
+                {day.topic}
+              </div>
+              <div className="flex items-center gap-1">
                 {day.isCompleted ? (
-                  <span className="text-emerald-400 flex items-center gap-1 font-bold">
+                  <span className="text-emerald-400 flex items-center gap-1 font-bold text-[10px]">
                     <CheckCircle2 className="w-3 h-3" /> {day.minutesSpent} min
                   </span>
                 ) : (
-                  <span className="text-slate-500 flex items-center gap-1">
-                    <Clock className="w-3 h-3" /> 15 min
+                  <span className="text-slate-400 flex items-center gap-1 text-[10px] font-medium">
+                    <Clock className="w-3 h-3 opacity-70" /> 15 min
                   </span>
                 )}
               </div>
             </div>
-          </div>
+          </Card>
         ))}
       </div>
-    </div>
+    </Card>
   );
 }
+

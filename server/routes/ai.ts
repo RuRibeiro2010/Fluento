@@ -7,123 +7,110 @@
 
 import { Router, Request, Response } from 'express';
 import { aiRuntime } from '../../src/lib/ai-runtime/ai-runtime';
-import { ModelRequest } from '../../src/lib/ai-runtime/types';
+import { AiGenerationSchema, createApiError } from '../validators/ai.validator';
 
 export const aiRouter = Router();
 
 /**
- * Input validation and sanitization for AI requests.
+ * TRANSITIONAL SECURITY PROTECTION
+ * 
+ * Ensures the request originates from the Fluento application itself.
+ * This is a first-line defense before full session-based authentication is implemented.
  */
-function validateAiRequest(body: any): { valid: boolean; error?: string; request?: ModelRequest } {
-  if (!body || typeof body !== 'object') {
-    return { valid: false, error: 'Request body must be a valid JSON object.' };
+const verifyInternalRequest = (req: Request, res: Response): boolean => {
+  // Guard for non-Express requests (e.g. some mock testing environments)
+  if (typeof req.get !== 'function') return true;
+
+  const origin = req.get('origin');
+  const host = req.get('host');
+  const isDev = process.env.NODE_ENV !== 'production';
+
+  // 1. Mandatory Origin in Production
+  if (!isDev && !origin) {
+    res.status(403).json(createApiError('ACCESS_FORBIDDEN', 'Origin header is required.'));
+    return false;
   }
 
-  // Reject client attempts to pass API keys or credentials
-  if (body.apiKey || body.credentials || body.secret) {
-    return { valid: false, error: 'Client-supplied credentials or API keys are strictly forbidden.' };
-  }
+  // 2. Exact Origin Matching
+  if (origin) {
+    // In production, we expect the Origin to exactly match the current Host with HTTPS
+    const expectedOrigin = isDev ? `http://${host}` : `https://${host}`;
+    
+    // Whitelist for development
+    const allowedDevOrigins = [
+      'http://localhost:3000',
+      'http://localhost:5173',
+      `http://${host}`
+    ];
 
-  if (!body.prompt || typeof body.prompt !== 'string' || body.prompt.trim().length === 0) {
-    return { valid: false, error: 'Field "prompt" is required and must be a non-empty string.' };
-  }
-
-  if (body.prompt.length > 10000) {
-    return { valid: false, error: 'Field "prompt" exceeds maximum allowed length of 10,000 characters.' };
-  }
-
-  if (body.systemInstruction && (typeof body.systemInstruction !== 'string' || body.systemInstruction.length > 5000)) {
-    return { valid: false, error: 'Field "systemInstruction" must be a string under 5,000 characters.' };
-  }
-
-  if (body.temperature !== undefined) {
-    if (typeof body.temperature !== 'number' || body.temperature < 0 || body.temperature > 1) {
-      return { valid: false, error: 'Field "temperature" must be a number between 0 and 1.' };
+    if (isDev) {
+      if (!allowedDevOrigins.includes(origin)) {
+        res.status(403).json(createApiError('ACCESS_FORBIDDEN', 'Invalid request origin.'));
+        return false;
+      }
+    } else {
+      // Strict check in production: must be EXACT match
+      if (origin !== expectedOrigin) {
+        res.status(403).json(createApiError('ACCESS_FORBIDDEN', 'Cross-origin request denied.'));
+        return false;
+      }
     }
   }
 
-  if (body.maxTokens !== undefined) {
-    if (typeof body.maxTokens !== 'number' || body.maxTokens < 1 || body.maxTokens > 8192) {
-      return { valid: false, error: 'Field "maxTokens" must be a number between 1 and 8192.' };
-    }
-  }
-
-  const sanitizedRequest: ModelRequest = {
-    prompt: body.prompt.trim(),
-    systemInstruction: body.systemInstruction ? body.systemInstruction.trim() : undefined,
-    temperature: body.temperature,
-    maxTokens: body.maxTokens,
-    modelName: body.modelName ? String(body.modelName) : undefined,
-    providerPreference: Array.isArray(body.providerPreference) ? body.providerPreference : undefined,
-    sessionId: body.sessionId ? String(body.sessionId).substring(0, 100) : undefined,
-    studentId: body.studentId ? String(body.studentId).substring(0, 100) : undefined,
-  };
-
-  return { valid: true, request: sanitizedRequest };
-}
+  return true;
+};
 
 /**
  * POST /api/ai/generate
  */
 aiRouter.post('/generate', async (req: Request, res: Response): Promise<void> => {
-  const { valid, error, request } = validateAiRequest(req.body);
+  // 1. Internal Origin Protection
+  if (!verifyInternalRequest(req, res)) return;
 
-  if (!valid || !request) {
-    res.status(400).json({
-      error: 'INVALID_REQUEST',
-      message: error || 'Invalid request payload.',
-      status: 400
-    });
+  // 2. Validation (Zod)
+  const validation = AiGenerationSchema.safeParse(req.body);
+  
+  if (!validation.success) {
+    res.status(400).json(createApiError(
+      'INVALID_REQUEST',
+      'The request payload is invalid or exceeds allowed limits.',
+      validation.error.format()
+    ));
     return;
   }
 
+  const request = validation.data;
+
+  // 2. Provider Check (Pre-execution)
   if (!process.env.GEMINI_API_KEY && process.env.ALLOW_MOCK_AI !== 'true') {
-    res.status(503).json({
-      error: 'AI_PROVIDER_NOT_CONFIGURED',
-      message: 'AI Provider is not configured. GEMINI_API_KEY is missing on the server.',
-      status: 503
-    });
+    res.status(503).json(createApiError(
+      'AI_PROVIDER_NOT_CONFIGURED',
+      'The AI service is currently unavailable or unconfigured on the server.'
+    ));
     return;
   }
 
   try {
+    // 3. Execution (Standard AIRuntime Facade)
     const result = await aiRuntime.execute(request);
+    
+    // 4. Response (Sanitized via AIRuntime response model)
     res.status(200).json(result);
   } catch (err: any) {
     const errorMessage = err.message || String(err);
 
+    // 5. Error Sanitization & Standardized Contract
     if (errorMessage.includes('GEMINI_API_KEY_MISSING')) {
-      res.status(503).json({
-        error: 'AI_PROVIDER_NOT_CONFIGURED',
-        message: 'AI Provider is not configured. GEMINI_API_KEY is missing on the server.',
-        status: 503
-      });
-      return;
+      res.status(503).json(createApiError('AI_PROVIDER_NOT_CONFIGURED', 'AI credentials missing.'));
+    } else if (errorMessage.includes('Timeout')) {
+      res.status(504).json(createApiError('AI_TIMEOUT', 'The AI request timed out.'));
+    } else if (errorMessage.includes('Rate limit')) {
+      res.status(429).json(createApiError('AI_RATE_LIMIT_EXCEEDED', 'Rate limit exceeded. Please try again later.'));
+    } else if (errorMessage.includes('Budget cap')) {
+      res.status(403).json(createApiError('AI_BUDGET_EXCEEDED', 'Session AI budget limit reached.'));
+    } else {
+      res.status(500).json(createApiError('AI_INTERNAL_ERROR', 'An unexpected error occurred during generation.'));
     }
-
-    if (errorMessage.includes('Timeout')) {
-      res.status(504).json({
-        error: 'AI_TIMEOUT',
-        message: 'AI request timed out.',
-        status: 504
-      });
-      return;
-    }
-
-    if (errorMessage.includes('Rate limit')) {
-      res.status(429).json({
-        error: 'AI_RATE_LIMIT_EXCEEDED',
-        message: 'AI rate limit exceeded. Please retry later.',
-        status: 429
-      });
-      return;
-    }
-
-    res.status(500).json({
-      error: 'AI_PROVIDER_FAILURE',
-      message: 'Failed to process AI generation request.',
-      status: 500
-    });
   }
 });
 
@@ -131,26 +118,35 @@ aiRouter.post('/generate', async (req: Request, res: Response): Promise<void> =>
  * POST /api/ai/stream
  */
 aiRouter.post('/stream', async (req: Request, res: Response): Promise<void> => {
-  const { valid, error, request } = validateAiRequest(req.body);
+  // 1. Internal Origin Protection
+  if (!verifyInternalRequest(req, res)) return;
 
-  if (!valid || !request) {
-    res.status(400).json({
-      error: 'INVALID_REQUEST',
-      message: error || 'Invalid request payload.',
-      status: 400
-    });
+  // 2. Validation (Zod)
+  const validation = AiGenerationSchema.safeParse(req.body);
+  
+  if (!validation.success) {
+    res.status(400).json(createApiError(
+      'INVALID_REQUEST',
+      'The request payload is invalid.',
+      validation.error.format()
+    ));
     return;
   }
+
+  const request = validation.data;
 
   if (!process.env.GEMINI_API_KEY && process.env.ALLOW_MOCK_AI !== 'true') {
-    res.status(503).json({
-      error: 'AI_PROVIDER_NOT_CONFIGURED',
-      message: 'AI Provider is not configured. GEMINI_API_KEY is missing on the server.',
-      status: 503
-    });
+    res.status(503).json(createApiError('AI_PROVIDER_NOT_CONFIGURED', 'AI service not configured.'));
     return;
   }
 
+  // 3. Abort Handling
+  const abortController = new AbortController();
+  req.on('close', () => {
+    abortController.abort();
+  });
+
+  // 4. Stream Setup (SSE Headers)
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -158,20 +154,26 @@ aiRouter.post('/stream', async (req: Request, res: Response): Promise<void> => {
   res.flushHeaders?.();
 
   try {
-    await aiRuntime.executeStream(request, (chunk) => {
+    // 5. Execution
+    await aiRuntime.executeStream({ ...request, signal: abortController.signal }, (chunk) => {
+      if (abortController.signal.aborted) return;
+      // 6. Streaming Output (Standardized Chunks)
       res.write(`data: ${JSON.stringify(chunk)}\n\n`);
     });
     res.end();
   } catch (err: any) {
+    if (abortController.signal.aborted) {
+      res.end();
+      return;
+    }
+    // 7. Stream Error Handling
     const errorMessage = err.message || String(err);
-    const errorChunk = {
-      error: 'AI_STREAM_FAILURE',
-      message: errorMessage.includes('GEMINI_API_KEY_MISSING')
-        ? 'GEMINI_API_KEY is missing on server'
-        : 'Error occurred during streaming generation.',
-      done: true
-    };
-    res.write(`data: ${JSON.stringify(errorChunk)}\n\n`);
+    const errorResponse = createApiError(
+      errorMessage.includes('GEMINI_API_KEY_MISSING') ? 'AI_PROVIDER_NOT_CONFIGURED' : 'AI_STREAM_ERROR',
+      'An error occurred during the AI stream.'
+    );
+    
+    res.write(`data: ${JSON.stringify({ ...errorResponse, done: true })}\n\n`);
     res.end();
   }
 });

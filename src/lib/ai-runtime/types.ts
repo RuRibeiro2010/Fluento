@@ -19,6 +19,7 @@ export interface ModelRequest {
   sessionId?: string;
   studentId?: string;
   timeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 export interface ModelResponse {

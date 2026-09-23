@@ -1,8 +1,7 @@
+'use client';
+
 import React, { useEffect, useState } from 'react';
 import { UserProfile } from '@/types/profile';
-import { StudyPlan } from '@/types/study-plan';
-import { Lesson } from '@/types/lesson';
-import { SundayWeeklyReview } from '@/types/coach';
 import {
   DashboardHeader,
   MetricsOverviewGrid,
@@ -14,19 +13,13 @@ import {
 import { DailyCoachBanner } from '@/components/coach/DailyCoachBanner';
 import { SundayWeeklyReviewModal } from '@/components/coach/SundayWeeklyReviewModal';
 import { MonthlyTimelineView } from '@/components/progress/MonthlyTimelineView';
-import { CoachCard } from '@/components/coach/CoachCard';
 import { LessonCard } from '@/components/lesson/LessonCard';
-import {
-  generateStudyPlan,
-  generateDailyCoachMessage,
-  generateSundayWeeklyReview,
-  createInitialLongitudinalMemory,
-} from '@/lib/ai/coach';
-import { generateLesson } from '@/lib/ai/lesson-generator';
 import { LoadingState } from '@/components/ui/LoadingState';
-import { BookOpen, Sparkles, Plus, Layers, Flame, Target, Calendar, TrendingUp } from 'lucide-react';
+import { Sparkles, Plus, TrendingUp } from 'lucide-react';
 import { dashboardAdapter, studentProfileAdapter, DashboardViewModelDTO } from '@/src/application/adapters';
-import { StudentProfileData } from '@/src/domain/student/entities/student-profile.entity';
+import { SynchronizedStudentState } from '@/src/application/services/student-profile-sync.service';
+import { DetailedLessonDTO } from '@/src/application/dto/lesson.dtos';
+import { MonthlyEvolutionDataDTO } from '@/src/application/dto/coach.dtos';
 
 interface DashboardPageProps {
   userProfile?: UserProfile;
@@ -37,7 +30,6 @@ interface DashboardPageProps {
 export default function DashboardPage({
   userProfile,
   onSelectLesson,
-  onNavigateView,
 }: DashboardPageProps) {
   const [profile, setProfile] = useState<Partial<UserProfile>>(
     userProfile || {
@@ -45,35 +37,24 @@ export default function DashboardPage({
       email: 'user@fluento.ai',
       native_language: 'pt',
       target_languages: ['es'],
-      coach_personality: 'encouraging',
-      minutes_per_day: 15,
-      confidence_score: 76,
-      current_focus: 'Apresentação Executiva & Negociação de Ideias',
-      profession: 'Diretor de Operações',
-      hobbies: ['Tecnologia', 'Viagens', 'Café'],
-      motivation: 'Liderar reuniões internacionais e negociações com total fluência',
     }
   );
 
-  const [studyPlan, setStudyPlan] = useState<StudyPlan | null>(null);
-  const [lessons, setLessons] = useState<Lesson[]>([]);
   const [dashboardData, setDashboardData] = useState<DashboardViewModelDTO | null>(null);
-  const [coachBannerMessage, setCoachBannerMessage] = useState<any>(null);
-  const [weeklyReview, setWeeklyReview] = useState<SundayWeeklyReview | null>(null);
+  const [evolutionData, setEvolutionData] = useState<MonthlyEvolutionDataDTO | null>(null);
+  const [lessons, setLessons] = useState<DetailedLessonDTO[]>([]);
   const [showWeeklyReviewModal, setShowWeeklyReviewModal] = useState(false);
   const [currentSubView, setCurrentSubView] = useState<'dashboard' | 'timeline'>('dashboard');
   const [loading, setLoading] = useState(true);
-
-  const memory = createInitialLongitudinalMemory(profile.id || 'usr_demo', 'es', profile);
 
   useEffect(() => {
     let isMounted = true;
     const studentId = userProfile?.id || profile.id || 'usr_fluento_primary';
 
     // Subscribe to student profile updates across application layer
-    const unsubscribe = studentProfileAdapter.subscribe((updatedData: StudentProfileData) => {
+    const unsubscribe = studentProfileAdapter.subscribe((state: SynchronizedStudentState) => {
       if (isMounted) {
-        studentProfileAdapter.getLegacyUserProfile(updatedData.id).then((legacy) => {
+        studentProfileAdapter.getLegacyUserProfile(state.profile.id).then((legacy) => {
           if (isMounted) setProfile(legacy);
         });
       }
@@ -82,70 +63,31 @@ export default function DashboardPage({
     async function loadDashboardData() {
       setLoading(true);
 
-      // 1. Fetch canonical profile from Application Layer (UI -> Application Adapter -> Profile Sync Service -> Storage)
-      let canonicalProfile: StudentProfileData | undefined;
       try {
-        canonicalProfile = await studentProfileAdapter.getCanonicalProfile(studentId);
-        if (canonicalProfile && isMounted) {
-          const legacyProfile = await studentProfileAdapter.getLegacyUserProfile(studentId);
-          setProfile(legacyProfile);
+        // 1. Fetch complete dashboard view model from Application Layer Adapter (UI -> Adapter -> Use Cases -> AI/Domain -> DTO -> UI)
+        // This single call now resolves profile, metrics, coach message, and weekly review summary.
+        const appVm = await dashboardAdapter.getDashboardViewModel(studentId);
+        
+        // Fetch evolution data for the timeline sub-view
+        const timelineData = await dashboardAdapter.getMonthlyEvolutionData(studentId);
+        
+        if (isMounted) {
+          setDashboardData(appVm);
+          setEvolutionData(timelineData);
+          
+          // Sync local legacy profile state for backwards compatibility
+          const legacy = await studentProfileAdapter.getLegacyUserProfile(studentId);
+          setProfile(legacy);
+
+          // 2. Load initial adaptive lessons via Application Layer
+          const initialLesson = await dashboardAdapter.generateNewLesson(studentId);
+          setLessons([initialLesson]);
+          
+          setLoading(false);
         }
-      } catch (profileErr) {
-        console.warn('[DashboardPage] Could not load canonical profile, falling back to local state:', profileErr);
-      }
-
-      // 2. Query Application Layer via DashboardAdapter (UI -> Adapter -> Query Handlers -> Domain -> DTO -> UI)
-      try {
-        const appVm = await dashboardAdapter.getDashboardViewModel(studentId, canonicalProfile || profile);
-        if (isMounted) setDashboardData(appVm);
       } catch (err) {
-        console.warn('[DashboardPage] Application layer query failed, continuing with legacy fallback:', err);
-      }
-
-      const activeProfile = canonicalProfile
-        ? await studentProfileAdapter.getLegacyUserProfile(studentId)
-        : profile;
-
-      const targetLang = activeProfile.target_languages?.[0] || 'es';
-      const nativeLang = activeProfile.native_language || 'pt';
-
-      const plan = await generateStudyPlan(activeProfile, targetLang, nativeLang);
-      const coachMsg = await generateDailyCoachMessage(activeProfile, undefined, memory);
-      const review = generateSundayWeeklyReview(activeProfile, memory);
-
-      const sampleLessons = await Promise.all([
-        generateLesson(
-          targetLang,
-          nativeLang,
-          'Apresentação Executiva & Negociação de Ideias',
-          'B1',
-          activeProfile,
-          memory
-        ),
-        generateLesson(
-          targetLang,
-          nativeLang,
-          'Check-in e Imigração no Aeroporto',
-          'A2',
-          activeProfile,
-          memory
-        ),
-        generateLesson(
-          targetLang,
-          nativeLang,
-          'Discussão de Projetos e Prazos',
-          'B2',
-          activeProfile,
-          memory
-        ),
-      ]);
-
-      if (isMounted) {
-        setStudyPlan(plan);
-        setCoachBannerMessage(coachMsg);
-        setWeeklyReview(review);
-        setLessons(sampleLessons);
-        setLoading(false);
+        console.warn('[DashboardPage] Application layer query failed:', err);
+        if (isMounted) setLoading(false);
       }
     }
 
@@ -162,26 +104,37 @@ export default function DashboardPage({
   }
 
   // Render Monthly Evolution Timeline Sub-view if active
-  if (currentSubView === 'timeline') {
+  if (currentSubView === 'timeline' && evolutionData) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 p-4 md:p-8">
         <MonthlyTimelineView
-          userProfile={profile}
-          memory={memory}
+          evolutionData={evolutionData}
           onBackToDashboard={() => setCurrentSubView('dashboard')}
         />
       </div>
     );
   }
 
-  const firstLesson = lessons[0];
-
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-4 md:p-8 space-y-8 max-w-7xl mx-auto font-sans">
       {/* Sunday Weekly Review Modal */}
-      {showWeeklyReviewModal && weeklyReview && (
+      {showWeeklyReviewModal && dashboardData?.weeklyReview && (
         <SundayWeeklyReviewModal
-          review={weeklyReview}
+          review={{
+            id: dashboardData.weeklyReview.weekId,
+            weekNumber: 4,
+            dateRange: 'Resumo da Semana',
+            achievements: [
+              `Accuracy: ${dashboardData.weeklyReview.overallAccuracy}%`,
+              `Time: ${dashboardData.weeklyReview.totalMinutes}m`,
+              `Words: ${dashboardData.weeklyReview.wordsLearned}`,
+            ],
+            weaknessesIdentified: [dashboardData.weeklyReview.topWeakness],
+            completedGoals: [`${dashboardData.weeklyReview.sessionsCount} sessões`],
+            nextWeekPlan: [dashboardData.weeklyReview.recommendation],
+            coachPersonalNote: dashboardData.weeklyReview.coachFeedback,
+            isViewed: false,
+          }}
           onClose={() => setShowWeeklyReviewModal(false)}
         />
       )}
@@ -217,10 +170,17 @@ export default function DashboardPage({
       </div>
 
       {/* Daily Coach Banner with Long-Term Memory & Actions */}
-      {coachBannerMessage && (
+      {dashboardData?.coachMessage && (
         <DailyCoachBanner
-          message={coachBannerMessage}
-          onStartLesson={() => onSelectLesson && onSelectLesson(firstLesson?.id || 'lesson-1')}
+          message={{
+            greeting: dashboardData.coachMessage.teacherName,
+            advice: dashboardData.coachMessage.text,
+            focusSkill: dashboardData.student.currentFocus,
+            recommendedAction: dashboardData.coachMessage.actionLabel,
+            motivationQuote: 'Consistency beats intensity every single time.',
+            tone: dashboardData.coachMessage.teacherPersona,
+          }}
+          onStartLesson={() => onSelectLesson && onSelectLesson(lessons[0]?.id || 'lesson-1')}
           onOpenWeeklyReview={() => setShowWeeklyReviewModal(true)}
           onOpenTimeline={() => setCurrentSubView('timeline')}
         />
@@ -229,7 +189,7 @@ export default function DashboardPage({
       {/* Metrics Overview Bar */}
       <MetricsOverviewGrid
         streakDays={dashboardData?.metrics.streakDays || 5}
-        confidenceScore={dashboardData?.metrics.confidenceScore || profile.confidence_score || 76}
+        confidenceScore={dashboardData?.metrics.confidenceScore || 76}
         fluencyLevel={dashboardData?.metrics.fluencyLevel || "B1 Intermédio"}
         pronunciationMastery={dashboardData?.metrics.pronunciationMastery || 88}
         activeVocabularyCount={dashboardData?.metrics.activeVocabularyCount || 340}
@@ -241,7 +201,7 @@ export default function DashboardPage({
         <div className="lg:col-span-2 space-y-8">
           {/* Hoje & Próxima Aula */}
           <DailyFocusCard
-            nextLesson={firstLesson}
+            nextLesson={lessons[0] as any}
             onStartLesson={(id) => onSelectLesson && onSelectLesson(id)}
             onOpenVirtualTeacher={() => onSelectLesson && onSelectLesson('virtual-teacher')}
           />
@@ -263,14 +223,8 @@ export default function DashboardPage({
               </div>
               <button
                 onClick={async () => {
-                  const newLesson = await generateLesson(
-                    profile.target_languages?.[0] || 'es',
-                    profile.native_language || 'pt',
-                    'Nova Leção Adaptativa do Professor',
-                    'B1',
-                    profile,
-                    memory
-                  );
+                  const studentId = dashboardData?.student.id || 'usr_fluento_primary';
+                  const newLesson = await dashboardAdapter.generateNewLesson(studentId);
                   setLessons((prev) => [newLesson, ...prev]);
                 }}
                 className="min-h-[44px] inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-950 hover:bg-indigo-900 border border-indigo-800 text-indigo-300 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
@@ -284,7 +238,7 @@ export default function DashboardPage({
               {lessons.map((lesson) => (
                 <LessonCard
                   key={lesson.id}
-                  lesson={lesson}
+                  lesson={lesson as any}
                   onStart={(id) => onSelectLesson && onSelectLesson(id)}
                 />
               ))}
@@ -293,7 +247,7 @@ export default function DashboardPage({
 
           {/* Objetivos & Missões do Mundo Real */}
           <MissionsGoalsList
-            primaryGoal={profile.current_focus || 'Fluência em Negócios e Viagens'}
+            primaryGoal={dashboardData?.student.currentFocus || 'Fluência em Negócios e Viagens'}
             onStartMission={(mId) => onSelectLesson && onSelectLesson(mId)}
           />
 
@@ -338,30 +292,30 @@ export default function DashboardPage({
             </p>
             <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-400 space-y-1">
               <span className="font-bold text-slate-200 block">Deteção Emocional & Adaptação:</span>
-              <p className="text-emerald-400 font-medium">Estado: Confiante (88% motivação). O ritmo foi acelerado para novos desafios práticos.</p>
+              <p className="text-emerald-400 font-medium">Estado: Confiante ({dashboardData?.metrics.confidenceScore}% motivação). O ritmo foi acelerado para novos desafios práticos.</p>
             </div>
           </div>
 
           {/* Current Study Plan Summary */}
-          {studyPlan && (
+          {dashboardData?.activePlan && (
             <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5 space-y-4">
               <div className="flex items-center justify-between pb-2 border-b border-slate-800">
                 <div>
                   <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider block">
                     Plano de Estudo Ativo
                   </span>
-                  <h4 className="font-bold text-white text-sm">{studyPlan.title}</h4>
+                  <h4 className="font-bold text-white text-sm">{dashboardData.activePlan.primaryObjective}</h4>
                 </div>
                 <span className="px-2.5 py-1 text-[10px] font-bold rounded-full bg-indigo-950 text-indigo-300 border border-indigo-800">
-                  {studyPlan.estimatedWeeks} Semanas
+                   Meta Ativa
                 </span>
               </div>
 
               <div className="space-y-2">
-                {studyPlan.modules.slice(0, 3).map((mod) => (
+                {dashboardData.activePlan.missions.slice(0, 3).map((mod) => (
                   <div key={mod.id} className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs flex items-center justify-between">
                     <span className="text-slate-300 font-medium truncate max-w-[160px]">{mod.title}</span>
-                    <span className="text-indigo-400 font-bold">{mod.completedCount}/{mod.totalLessons}</span>
+                    <span className="text-indigo-400 font-bold">{mod.completed ? 'Ok' : 'Pendente'}</span>
                   </div>
                 ))}
               </div>

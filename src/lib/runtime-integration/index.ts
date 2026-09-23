@@ -15,5 +15,3 @@ export * from './error-recovery';
 export * from './telemetry';
 export * from './pipeline-orchestrator';
 export * from './runtime-integration';
-export * from './fixtures';
-export * from './__tests__/runtime-integration.test';

@@ -1,5 +1,6 @@
 import React from 'react';
-import { Target, Flag, CheckCircle2, ChevronRight, Sparkles, ArrowUpRight } from 'lucide-react';
+import { Target, CheckCircle2, ChevronRight, Sparkles } from 'lucide-react';
+import { Card, Button, Badge, Heading3, CaptionText } from '@/src/components/design-system';
 
 export interface MissionItem {
   id: string;
@@ -47,69 +48,66 @@ export function MissionsGoalsList({
   onStartMission,
 }: MissionsGoalsListProps) {
   return (
-    <div className="rounded-2xl bg-slate-900 border border-slate-800 p-6 space-y-5">
+    <Card className="p-6 space-y-5">
       <div className="flex items-center justify-between pb-3 border-b border-slate-800">
         <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-indigo-950 text-indigo-400 border border-indigo-800">
+          <div className="p-2.5 rounded-xl bg-indigo-950/50 text-indigo-400 border border-indigo-900/30">
             <Target className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="font-bold text-white text-base">Objetivos & Missões do Mundo Real</h3>
-            <p className="text-xs text-slate-400">Objetivo Principal: <span className="text-slate-200 font-semibold">{primaryGoal}</span></p>
+            <Heading3 className="text-base font-bold">Objetivos & Missões do Mundo Real</Heading3>
+            <CaptionText className="text-slate-400">
+              Objetivo Principal: <span className="text-slate-200 font-semibold">{primaryGoal}</span>
+            </CaptionText>
           </div>
         </div>
 
-        <span className="text-xs font-bold text-amber-400 flex items-center gap-1 bg-amber-950/60 border border-amber-800 px-3 py-1 rounded-full">
-          <Sparkles className="w-3.5 h-3.5 fill-amber-400" /> +470 XP Acumulados
-        </span>
+        <Badge variant="warning" className="px-3 py-1 gap-1.5 shadow-amber-900/10">
+          <Sparkles className="w-3.5 h-3.5 fill-amber-400" /> +470 XP
+        </Badge>
       </div>
 
       <div className="space-y-3">
         {missions.map((mission) => (
-          <div
+          <Card
             key={mission.id}
-            className="p-4 rounded-xl bg-slate-950 border border-slate-800/80 hover:border-indigo-500/50 transition flex items-center justify-between gap-4"
+            variant="outlined"
+            className="p-4 flex items-center justify-between gap-4 border-slate-800/60 bg-slate-950/40 hover:bg-slate-950/60 transition-colors"
           >
-            <div className="space-y-1.5 flex-1">
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 px-2 py-0.5 rounded-full bg-indigo-950 border border-indigo-800">
+            <div className="space-y-2 flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Badge variant="primary" size="sm" className="uppercase font-black">
                   {mission.category}
-                </span>
-                <h4 className="font-bold text-sm text-white">{mission.title}</h4>
+                </Badge>
+                <h4 className="font-bold text-sm text-white truncate">{mission.title}</h4>
               </div>
 
               <div className="flex items-center gap-3 text-xs text-slate-400">
-                <div className="w-32 bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                <div className="w-24 sm:w-32 bg-slate-800 rounded-full h-1.5 overflow-hidden shadow-inner">
                   <div
-                    className="bg-indigo-500 h-1.5 rounded-full"
+                    className="bg-indigo-500 h-1.5 rounded-full transition-all duration-700"
                     style={{ width: `${mission.progressPercent}%` }}
                   />
                 </div>
-                <span>{mission.progressPercent}% Concluído</span>
+                <CaptionText className="text-[10px] font-bold text-slate-500">
+                  {mission.progressPercent}%
+                </CaptionText>
               </div>
             </div>
 
-            <button
+            <Button
               onClick={() => onStartMission && onStartMission(mission.id)}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 ${
-                mission.isCompleted
-                  ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
-                  : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/20'
-              }`}
+              variant={mission.isCompleted ? 'secondary' : 'primary'}
+              size="sm"
+              className={mission.isCompleted ? 'bg-emerald-950/40 border-emerald-800/40 text-emerald-400' : ''}
+              icon={mission.isCompleted ? <CheckCircle2 className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
             >
-              {mission.isCompleted ? (
-                <>
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Concluída (+{mission.rewardXp} XP)
-                </>
-              ) : (
-                <>
-                  Iniciar Missão <ChevronRight className="w-3.5 h-3.5" />
-                </>
-              )}
-            </button>
-          </div>
+              {mission.isCompleted ? `+${mission.rewardXp} XP` : 'Iniciar'}
+            </Button>
+          </Card>
         ))}
       </div>
-    </div>
+    </Card>
   );
 }
+

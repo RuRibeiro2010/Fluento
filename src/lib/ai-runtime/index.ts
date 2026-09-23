@@ -17,5 +17,4 @@ export * from './token-usage-tracker';
 export * from './cost-tracker';
 export * from './telemetry';
 export * from './ai-runtime';
-export * from './fixtures';
 export * from '../api/ai-client';

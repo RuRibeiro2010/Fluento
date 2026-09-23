@@ -22,11 +22,8 @@ import {
   Image as ImageIcon,
 } from 'lucide-react';
 import { SkillMatrix, LearningProfileDiagnostic, DiagnosticInitialPlan } from '@/types/profile';
-import {
-  evaluateUserLevelMultimodal,
-  calculateNextAdaptiveDifficulty,
-  AssessmentTurnResponse,
-} from '@/lib/ai/assessment';
+import { assessmentAdapter } from '@/src/application/adapters';
+import { AssessmentTurnResponseDTO, AssessmentResultDTO } from '@/src/application/dto/assessment.dtos';
 
 export interface AssessmentResultData {
   assignedLevel: 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2';
@@ -69,7 +66,7 @@ export function AdaptiveAssessmentView({
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
 
   // Recorded turns data
-  const [turnResponses, setTurnResponses] = useState<AssessmentTurnResponse[]>([]);
+  const [turnResponses, setTurnResponses] = useState<AssessmentTurnResponseDTO[]>([]);
 
   // User current inputs
   const [userSpeechInput, setUserSpeechInput] = useState('');
@@ -163,9 +160,9 @@ export function AdaptiveAssessmentView({
     setTurnResponses([]);
   };
 
-  const processAssessmentCompletion = async (responses: AssessmentTurnResponse[]) => {
+  const processAssessmentCompletion = async (responses: AssessmentTurnResponseDTO[]) => {
     setIsEvaluatingTurn(true);
-    const result = await evaluateUserLevelMultimodal(responses, targetLanguage);
+    const result = await assessmentAdapter.evaluateLevel(responses, targetLanguage);
 
     const fullResultData: AssessmentResultData = {
       assignedLevel: result.assignedLevel,
@@ -193,7 +190,7 @@ export function AdaptiveAssessmentView({
       ? currentTurn.options?.find((o) => o.id === selectedQuizOption)?.isCorrect
       : undefined;
 
-    const turnData: AssessmentTurnResponse = {
+    const turnData: AssessmentTurnResponseDTO = {
       turnId: `turn_${stepIndex + 1}`,
       turnType: currentTurn.type,
       userResponseText: userSpeechInput,
@@ -207,7 +204,7 @@ export function AdaptiveAssessmentView({
     setTurnResponses(updatedResponses);
 
     // Calculate dynamic adaptive difficulty update
-    const nextDiff = calculateNextAdaptiveDifficulty(currentAiDifficulty, turnData);
+    const nextDiff = assessmentAdapter.calculateNextDifficulty(currentAiDifficulty, turnData);
     setCurrentAiDifficulty(nextDiff);
 
     setTimeout(() => {

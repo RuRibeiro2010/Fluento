@@ -1,9 +1,30 @@
-import {
-  ConversationMessage,
-  ConversationSessionState,
-} from '../../domain/session/entities/conversation-session.entity';
+export type ConversationSessionStateDTO =
+  | 'idle'
+  | 'loading'
+  | 'active'
+  | 'error'
+  | 'completed'
+  | 'AI_NOT_CONFIGURED';
 
-export type ConversationMessageDTO = ConversationMessage;
+export type MessageSenderDTO = 'teacher' | 'student' | 'system';
+
+export type MessageTypeDTO =
+  | 'greeting'
+  | 'utterance'
+  | 'correction'
+  | 'feedback'
+  | 'system_status';
+
+export interface ConversationMessageDTO {
+  readonly id: string;
+  readonly sender: MessageSenderDTO;
+  readonly text: string;
+  readonly timestampIso: string;
+  readonly type: MessageTypeDTO;
+  readonly translation?: string;
+  readonly tip?: string;
+  readonly isStreaming?: boolean;
+}
 
 /**
  * Minimal, privacy-preserving student context for pedagogical AI adaptation.
@@ -51,8 +72,8 @@ export interface ConversationSessionDTO {
   readonly teacherPersona: string;
   readonly topic: string;
   readonly objective: string;
-  readonly messages: ReadonlyArray<ConversationMessage>;
-  readonly state: ConversationSessionState;
+  readonly messages: ReadonlyArray<ConversationMessageDTO>;
+  readonly state: ConversationSessionStateDTO;
   readonly startedAtIso: string;
   readonly updatedAtIso: string;
   readonly completedAtIso?: string;

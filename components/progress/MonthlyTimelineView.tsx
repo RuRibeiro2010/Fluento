@@ -1,7 +1,5 @@
 import React from 'react';
-import { UserProfile } from '@/types/profile';
-import { LongitudinalMemory, MonthlyEvolutionData } from '@/types/coach';
-import { generateMonthlyEvolutionData } from '@/lib/ai/coach';
+import { MonthlyEvolutionDataDTO } from '@/src/application/dto/coach.dtos';
 import {
   Calendar,
   Award,
@@ -20,18 +18,14 @@ import {
 } from 'lucide-react';
 
 interface MonthlyTimelineViewProps {
-  userProfile?: Partial<UserProfile>;
-  memory?: LongitudinalMemory;
+  evolutionData: MonthlyEvolutionDataDTO;
   onBackToDashboard?: () => void;
 }
 
 export function MonthlyTimelineView({
-  userProfile = {},
-  memory,
+  evolutionData,
   onBackToDashboard,
 }: MonthlyTimelineViewProps) {
-  const evolutionData: MonthlyEvolutionData = generateMonthlyEvolutionData(userProfile, memory);
-
   return (
     <div className="space-y-8 max-w-5xl mx-auto p-4 md:p-8">
       {/* Page Header */}

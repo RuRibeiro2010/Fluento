@@ -18,5 +18,3 @@ export * from './lesson-executor';
 export * from './session-manager';
 export * from './session-runtime';
 export * from './telemetry';
-export * from './fixtures';
-export * from './__tests__/session-runtime.test';

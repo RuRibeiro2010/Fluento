@@ -33,34 +33,17 @@ import { runPromptBuilderTestSuite } from '../src/lib/prompt-builder/__tests__/p
 import { runStudentDigitalTwinTestSuite } from '../src/lib/student-digital-twin/__tests__/student-digital-twin.test';
 import { runTeacherRuntimeTestSuite } from '../src/lib/teacher-runtime/__tests__/teacher-runtime.test';
 import { runRuntimeIntegrationTestSuite } from '../src/lib/runtime-integration/__tests__/runtime-integration.test';
+import { runRuntimeCoachMigrationTests } from '../src/application/services/__tests__/runtime-coach-migration.test';
+import { runRuntimeLessonMigrationTests } from '../src/application/services/__tests__/runtime-lesson-migration.test';
+import { runAIRuntimeTests } from '../src/lib/ai-runtime/__tests__/ai-runtime.test';
+import { runAISecurityTests } from '../src/lib/ai-runtime/__tests__/ai-security.test';
 
 /**
  * ============================================================================
- * NOT WIRED IN (2 of 15) - documented, not deleted, not modified.
+ * NOT WIRED IN (1 of 16) - documented, not deleted, not modified.
  * ============================================================================
  *
- * 1. src/lib/ai-runtime/__tests__/ai-runtime.test.ts  (runAIRuntimeTests)
- *
- *    BUG - unreliable result, not just "risky": the exported function is
- *    declared SYNCHRONOUS (`export function runAIRuntimeTests(): { passed,
- *    results }`), but 3 of its 8 assertions (Retry Manager, Timeout
- *    Manager, and the "AI Runtime Execution Facade" call) are scheduled via
- *    un-awaited `.then()/.catch()` chains. The function executes
- *    `return { passed, results }` before any of those 3 callbacks have run,
- *    so whatever they later push into `results` or assign to `passed`
- *    happens on an object the caller already received and (in every other
- *    suite in this project) already finished reading. Concretely: the "AI
- *    Runtime Execution Facade" assertion calls the real `aiRuntime.execute`
- *    - with Gemini intentionally disabled and ALLOW_MOCK_AI intentionally
- *    off, that call rejects with GEMINI_API_KEY_MISSING - but that failure
- *    can never reach the `passed` flag the caller already has. Wiring this
- *    suite in would silently print "PASS" over a real failure, which is
- *    worse than not running it. Fix belongs in the test file itself (make
- *    it `async`, `await` the 3 calls before returning) - out of scope for a
- *    runner-only hardening pass, since Task 2 of this sprint is to fix the
- *    RUNNER, not rewrite existing test suites' internals.
- *
- * 2. src/lib/session-runtime/__tests__/session-runtime.test.ts
+ * 1. src/lib/session-runtime/__tests__/session-runtime.test.ts
  *    (runSessionRuntimeTestSuite)
  *
  *    Two independent problems:
@@ -73,19 +56,11 @@ import { runRuntimeIntegrationTestSuite } from '../src/lib/runtime-integration/_
  *        anywhere in that chain - `SessionRuntime.processTurn` catches the
  *        error only to log a telemetry event and then re-throws it
  *        (`throw err;`). With Gemini and ALLOW_MOCK_AI both intentionally
- *        off (Task 6 of this sprint), that call throws
- *        GEMINI_API_KEY_MISSING as an UNCAUGHT rejection out of the test
- *        function itself - there is no top-level try/catch in
- *        `runSessionRuntimeTestSuite` to turn that into a "failed" result.
- *        It cannot currently complete at all, not even to a red result.
- *        Fixing (b) means adding error handling to PRODUCTION code
- *        (`turn-executor.ts` / `session-runtime.ts`, mirroring what
- *        `pipeline-orchestrator.ts` already does for the same call) - a
- *        functional change to production code, explicitly out of scope for
- *        this hardening pass ("não mudes o comportamento funcional").
+ *        off, that call throws GEMINI_API_KEY_MISSING as an UNCAUGHT 
+ *        rejection out of the test function itself.
  *
- * Both files are untouched. Re-evaluate once #1's async bug or #2's missing
- * production error handling is fixed on its own merits in a future sprint.
+ * This file is untouched. Re-evaluate once #2's missing production error 
+ * handling is fixed on its own merits in a future sprint.
  * ============================================================================
  */
 
@@ -155,12 +130,16 @@ const suites: SuiteDefinition[] = [
   { name: 'Student Digital Twin', run: runStudentDigitalTwinTestSuite },
   { name: 'Teacher Runtime', run: runTeacherRuntimeTestSuite },
   { name: 'Runtime Integration (12-stage pipeline)', run: runRuntimeIntegrationTestSuite },
+  { name: 'Coach AI Runtime Migration (Micro-Sprint 5B)', run: runRuntimeCoachMigrationTests },
+  { name: 'Lesson AI Runtime Migration (Micro-Sprint 6A)', run: runRuntimeLessonMigrationTests },
+  { name: 'AI Runtime Core (Resilience & Cost)', run: runAIRuntimeTests },
+  { name: 'AI Runtime Security (Allow-list & Retries)', run: runAISecurityTests },
 ];
 
 async function main() {
   console.log('====================================================');
   console.log('FLUENTO SYSTEM TESTS - FULL SUITE (Sprint 16A.4.1)');
-  console.log(`Running ${suites.length} of 15 known test suites (2 intentionally excluded - see file header)`);
+  console.log(`Running ${suites.length} of 17 known test suites (1 intentionally excluded - see file header)`);
   console.log('====================================================');
 
   const summary: { name: string; passed: boolean }[] = [];

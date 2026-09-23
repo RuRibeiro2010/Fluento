@@ -1,3 +1,17 @@
+import { 
+  SmartLessonIntroduction, 
+  SmartLessonEnding, 
+  PedagogicalDecision, 
+  IntelligentHomework 
+} from '../src/domain/lesson/types';
+
+export type { 
+  SmartLessonIntroduction, 
+  SmartLessonEnding, 
+  PedagogicalDecision, 
+  IntelligentHomework 
+};
+
 export type LessonDifficulty = 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2' | 'beginner' | 'intermediate' | 'advanced' | string;
 export type LessonType = 'grammar' | 'vocabulary' | 'conversation' | 'pronunciation' | 'culture' | 'reading' | 'listening' | string;
 
@@ -27,36 +41,6 @@ export interface DialogueLine {
   speaker: string;
   text: string;
   translation?: string;
-}
-
-export interface SmartLessonIntroduction {
-  whyThisLessonExists: string;
-  whyItIsImportant: string;
-  howItHelpsGoal: string;
-}
-
-export interface SmartLessonEnding {
-  whatImproved: string;
-  whatNeedsWork: string;
-  previewTomorrow: string;
-}
-
-export interface PedagogicalDecision {
-  studentNeeds: string;
-  rationale: string;
-  methodology: string;
-  estimatedMinutes: number;
-  expectedFriction: string;
-  motivationalHook: string;
-}
-
-export interface IntelligentHomework {
-  title: string;
-  type: 'video' | 'podcast' | 'news' | 'speech' | 'writing';
-  description: string;
-  estimatedMinutes: number;
-  goalTag?: string;
-  actionInstruction?: string;
 }
 
 export interface ExplainBetterContent {
